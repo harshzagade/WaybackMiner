@@ -1,0 +1,7 @@
+[project]
+name = "waybackminer"
+version = "1.0.0"
+description = "Mine the Wayback Machine for a domain's forgotten attack surface"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
