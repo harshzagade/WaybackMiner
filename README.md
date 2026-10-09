@@ -58,8 +58,17 @@ Interesting   : 3
   ...
 ```
 
-With `--js-only` or `--params-only`, the tool prints just those URL lists
-(one per line) so you can pipe them straight into other tools.
+With `--js-only`, the tool prints just the JS URL list (one per line) so you
+can pipe it straight into other tools. With `--params-only`, it prints the
+unique query-parameter names across the domain (sorted, one per line) — a
+ready seed list for wordlist builders like ParamMiner.
+
+```console
+$ python3 waybackminer.py target.example --params-only
+id
+q
+session
+```
 
 ## Tests
 

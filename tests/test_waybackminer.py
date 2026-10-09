@@ -83,7 +83,24 @@ class TestCli(unittest.TestCase):
         with mock.patch("sys.stdout", buf):
             rc = wm.main(["example.com", "--params-only"])
         self.assertEqual(rc, 0)
-        self.assertEqual(buf.getvalue().strip(), "http://example.com/search?q=test")
+        self.assertEqual(buf.getvalue().strip(), "q")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_params_only_reports_unique_names(self, _):
+        entries = [
+            {"original": "http://example.com/a?z=1&q=2", "statuscode": "200",
+             "mimetype": "text/html"},
+            {"original": "http://example.com/b?q=3&a=4", "statuscode": "200",
+             "mimetype": "text/html"},
+            {"original": "http://example.com/a?z=1&q=2", "statuscode": "200",
+             "mimetype": "text/html"},  # dup URL: must not double-count names
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual(buckets["param_names"], ["a", "q", "z"])
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets, params_only=True)
+        self.assertEqual(buf.getvalue().splitlines(), ["a", "q", "z"])
 
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_summary_counts(self, _):

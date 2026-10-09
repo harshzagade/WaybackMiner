@@ -54,9 +54,10 @@ def _ext(url):
 
 
 def analyze(entries):
-    """Split entries into js / params / interesting / all buckets (deduped, sorted)."""
+    """Split entries into js / params / param_names / interesting / all buckets (deduped, sorted)."""
     seen = set()
-    buckets = {"all": [], "js": [], "params": [], "interesting": []}
+    param_names = set()
+    buckets = {"all": [], "js": [], "params": [], "param_names": [], "interesting": []}
     for e in entries:
         url = e.get("original", "")
         if not url or url in seen:
@@ -66,12 +67,17 @@ def analyze(entries):
         ext = _ext(url)
         if ext == ".js" or e.get("mimetype", "").find("javascript") != -1:
             buckets["js"].append(url)
-        if urllib.parse.urlparse(url).query:
+        query = urllib.parse.urlparse(url).query
+        if query:
             buckets["params"].append(url)
+            for name, _value in urllib.parse.parse_qsl(query, keep_blank_values=True):
+                param_names.add(name)
         if ext in INTERESTING_EXTS:
             buckets["interesting"].append(url)
+    buckets["param_names"] = sorted(param_names)
     for k in buckets:
-        buckets[k].sort()
+        if k != "param_names":
+            buckets[k].sort()
     return buckets
 
 
@@ -81,8 +87,8 @@ def print_report(buckets, js_only=False, params_only=False):
             print(u)
         return
     if params_only:
-        for u in buckets["params"]:
-            print(u)
+        for name in buckets["param_names"]:
+            print(name)
         return
     print(f"Archived URLs : {len(buckets['all'])}")
     print(f"JS files      : {len(buckets['js'])}")
@@ -111,7 +117,7 @@ def main(argv=None):
     ap.add_argument("--js-only", action="store_true",
                     help="print only JavaScript file URLs")
     ap.add_argument("--params-only", action="store_true",
-                    help="print only URLs with query parameters")
+                    help="print only unique query-parameter names (sorted)")
     ap.add_argument("--output", "-o", help="write full URL list to file")
     args = ap.parse_args(argv)
 
