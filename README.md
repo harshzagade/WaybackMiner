@@ -4,6 +4,10 @@ Mine the [Wayback Machine](https://web.archive.org) for a domain's forgotten
 attack surface. Passive recon — it only talks to `web.archive.org`, never
 touches the target itself.
 
+> **In simple words:** the internet keeps old copies of websites. WaybackMiner
+> digs through those archived copies to find forgotten pages, links and clues —
+> without ever visiting the site itself.
+
 ## What it finds
 
 - **All archived URLs** for a domain (deduped, sorted)
@@ -72,6 +76,13 @@ id
 q
 session
 ```
+
+## Screenshots
+
+Real run against `example.com` (a documentation-reserved domain — WaybackMiner
+only queries `web.archive.org`, never the target itself):
+
+![WaybackMiner sample run on example.com](assets/screenshots/sample-run.png)
 
 ## Tests
 
