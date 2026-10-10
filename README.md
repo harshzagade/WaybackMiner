@@ -26,6 +26,7 @@ Stdlib only. Python 3.8+.
 python3 waybackminer.py example.com
 python3 waybackminer.py example.com --js-only
 python3 waybackminer.py example.com --params-only
+python3 waybackminer.py example.com --interesting-only
 python3 waybackminer.py example.com --limit 5000 -o urls.txt
 ```
 
@@ -61,7 +62,9 @@ Interesting   : 3
 With `--js-only`, the tool prints just the JS URL list (one per line) so you
 can pipe it straight into other tools. With `--params-only`, it prints the
 unique query-parameter names across the domain (sorted, one per line) — a
-ready seed list for wordlist builders like ParamMiner.
+ready seed list for wordlist builders like ParamMiner. With
+`--interesting-only`, it prints just the interesting-file URLs (`.bak`,
+`.sql`, `.env`, …), one per line, for piping into downloaders or scanners.
 
 ```console
 $ python3 waybackminer.py target.example --params-only

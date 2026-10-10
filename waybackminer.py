@@ -81,7 +81,7 @@ def analyze(entries):
     return buckets
 
 
-def print_report(buckets, js_only=False, params_only=False):
+def print_report(buckets, js_only=False, params_only=False, interesting_only=False):
     if js_only:
         for u in buckets["js"]:
             print(u)
@@ -89,6 +89,10 @@ def print_report(buckets, js_only=False, params_only=False):
     if params_only:
         for name in buckets["param_names"]:
             print(name)
+        return
+    if interesting_only:
+        for u in buckets["interesting"]:
+            print(u)
         return
     print(f"Archived URLs : {len(buckets['all'])}")
     print(f"JS files      : {len(buckets['js'])}")
@@ -118,6 +122,8 @@ def main(argv=None):
                     help="print only JavaScript file URLs")
     ap.add_argument("--params-only", action="store_true",
                     help="print only unique query-parameter names (sorted)")
+    ap.add_argument("--interesting-only", action="store_true",
+                    help="print only interesting-file URLs (one per line)")
     ap.add_argument("--output", "-o", help="write full URL list to file")
     args = ap.parse_args(argv)
 
@@ -131,7 +137,8 @@ def main(argv=None):
         return 0
 
     buckets = analyze(entries)
-    print_report(buckets, js_only=args.js_only, params_only=args.params_only)
+    print_report(buckets, js_only=args.js_only, params_only=args.params_only,
+                 interesting_only=args.interesting_only)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as fh:
             fh.write("\n".join(buckets["all"]) + "\n")

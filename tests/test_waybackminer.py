@@ -103,6 +103,33 @@ class TestCli(unittest.TestCase):
         self.assertEqual(buf.getvalue().splitlines(), ["a", "q", "z"])
 
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_interesting_only_output(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--interesting-only"])
+        self.assertEqual(rc, 0)
+        # note: the mock skips the API's statuscode filter, so the .bak row
+        # with status 404 still shows up here; the real CDX filter removes it
+        self.assertEqual(buf.getvalue().splitlines(),
+                         ["http://example.com/backup.sql",
+                          "http://example.com/old.bak"])
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_interesting_only_is_sorted(self, _):
+        entries = [
+            {"original": "http://example.com/z.zip", "statuscode": "200",
+             "mimetype": "application/zip"},
+            {"original": "http://example.com/a.bak", "statuscode": "200",
+             "mimetype": "text/plain"},
+        ]
+        buckets = wm.analyze(entries)
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets, interesting_only=True)
+        self.assertEqual(buf.getvalue().splitlines(),
+                         ["http://example.com/a.bak", "http://example.com/z.zip"])
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_summary_counts(self, _):
         buf = io.StringIO()
         with mock.patch("sys.stdout", buf):
