@@ -11,6 +11,7 @@ touches the target itself.
 ## What it finds
 
 - **All archived URLs** for a domain (deduped, sorted)
+- **First-seen / last-seen timestamps** per URL, from the CDX capture history
 - **JavaScript files** — prime recon targets
 - **URLs with query parameters** — injection surface
 - **Interesting files** — `.php`, `.bak`, `.sql`, `.env`, `.json`, `.git`, …
@@ -31,6 +32,7 @@ python3 waybackminer.py example.com
 python3 waybackminer.py example.com --js-only
 python3 waybackminer.py example.com --params-only
 python3 waybackminer.py example.com --interesting-only
+python3 waybackminer.py example.com --json
 python3 waybackminer.py example.com --limit 5000 -o urls.txt
 ```
 
@@ -76,6 +78,26 @@ id
 q
 session
 ```
+
+With `--json`, the tool prints the full bucketed report (all URLs, JS files,
+param URLs, param names, interesting files) as machine-readable JSON — handy
+for piping into `jq` or other recon tooling. Combined with `--output`, the
+JSON report is written to the file instead of the plain URL list.
+
+```console
+$ python3 waybackminer.py target.example --json | head -8
+{
+  "all": [
+    "http://target.example/about",
+    "http://target.example/app.js",
+    "http://target.example/backup.sql",
+    ...
+```
+
+Every URL also carries a `timeline` entry — the first and last Wayback
+capture timestamps seen for it (`YYYYMMDDHHMMSS`, from the CDX history),
+so you can tell whether a forgotten file is still being re-crawled. The
+text summary shows the overall capture window too.
 
 ## Screenshots
 

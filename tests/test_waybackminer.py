@@ -130,6 +130,91 @@ class TestCli(unittest.TestCase):
                          ["http://example.com/a.bak", "http://example.com/z.zip"])
 
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_json_mode_outputs_valid_json(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--json"])
+        self.assertEqual(rc, 0)
+        data = json.loads(buf.getvalue())
+        self.assertEqual(set(data), {"all", "js", "params", "param_names",
+                                     "interesting", "timeline"})
+        self.assertEqual(data["js"], ["http://example.com/app.js"])
+        self.assertEqual(data["params"], ["http://example.com/search?q=test"])
+        self.assertEqual(data["param_names"], ["q"])
+        self.assertIn("http://example.com/backup.sql", data["interesting"])
+        self.assertEqual(data["all"], sorted(data["all"]))
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_json_output_flag_writes_json_report(self, _):
+        with mock.patch("builtins.open", mock.mock_open()) as m:
+            rc = wm.main(["example.com", "--json", "-o", "out.json"])
+        self.assertEqual(rc, 0)
+        written = "".join(c.args[0] for c in
+                          m.return_value.write.call_args_list)
+        data = json.loads(written)
+        self.assertIn("interesting", data)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_json_conflicts_with_other_modes(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--json", "--js-only"])
+        self.assertEqual(cm.exception.code, 2)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_timeline_first_last_seen(self, _):
+        entries = [
+            {"original": "http://example.com/app.js", "statuscode": "200",
+             "mimetype": "application/javascript", "timestamp": "20240301000000"},
+            {"original": "http://example.com/app.js", "statuscode": "200",
+             "mimetype": "application/javascript", "timestamp": "20240101000000"},
+            {"original": "http://example.com/app.js", "statuscode": "200",
+             "mimetype": "application/javascript", "timestamp": "20240601000000"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual(buckets["timeline"]["http://example.com/app.js"],
+                         {"first_seen": "20240101000000",
+                          "last_seen": "20240601000000"})
+        # dupes must not re-add to the url buckets
+        self.assertEqual(buckets["all"], ["http://example.com/app.js"])
+
+    def test_timeline_missing_timestamps(self):
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "mimetype": "text/html"},  # no timestamp key at all
+            {"original": "http://example.com/b", "statuscode": "200",
+             "mimetype": "text/html", "timestamp": "20240501000000"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual(buckets["timeline"]["http://example.com/a"],
+                         {"first_seen": None, "last_seen": None})
+        self.assertIsNone(wm.capture_window({}))
+        # mixed: None entries are skipped when computing the window
+        self.assertEqual(wm.capture_window(buckets["timeline"]),
+                         ("20240501000000", "20240501000000"))
+
+    def test_timeline_sorted_by_url(self):
+        entries = [
+            {"original": "http://example.com/z", "statuscode": "200",
+             "mimetype": "text/html", "timestamp": "20240101000000"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "mimetype": "text/html", "timestamp": "20240201000000"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual(list(buckets["timeline"]),
+                         ["http://example.com/a", "http://example.com/z"])
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_summary_shows_capture_window(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com"])
+        self.assertEqual(rc, 0)
+        self.assertIn("Capture window: 20240101000000 .. 20240106000000",
+                      buf.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_summary_counts(self, _):
         buf = io.StringIO()
         with mock.patch("sys.stdout", buf):
