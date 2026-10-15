@@ -34,6 +34,7 @@ python3 waybackminer.py example.com --params-only
 python3 waybackminer.py example.com --interesting-only
 python3 waybackminer.py example.com --json
 python3 waybackminer.py example.com --limit 5000 -o urls.txt
+python3 waybackminer.py example.com --include-status 301,403  # also mine redirect/forbidden captures
 ```
 
 ## Sample run

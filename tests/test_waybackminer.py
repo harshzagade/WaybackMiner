@@ -225,5 +225,61 @@ class TestCli(unittest.TestCase):
         self.assertIn("JS files      : 1", out)
 
 
+class TestIncludeStatus(unittest.TestCase):
+    def test_parse_single(self):
+        self.assertEqual(wm.parse_statuses("200"), [200])
+
+    def test_parse_multiple_sorted_unique(self):
+        self.assertEqual(wm.parse_statuses("403, 301,403"), [301, 403])
+
+    def test_parse_rejects_non_numeric(self):
+        import argparse
+        with self.assertRaises(argparse.ArgumentTypeError):
+            wm.parse_statuses("abc")
+
+    def test_parse_rejects_out_of_range(self):
+        import argparse
+        for bad in ("99", "600", "0", "9999"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                wm.parse_statuses(bad)
+
+    def test_parse_rejects_empty(self):
+        import argparse
+        with self.assertRaises(argparse.ArgumentTypeError):
+            wm.parse_statuses("")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_default_filter_is_status_200(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com")
+            req = m.call_args[0][0]
+            self.assertIn("filter=statuscode%3A200", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_multiple_statuses_or_filter(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com", statuses=[301, 403])
+            req = m.call_args[0][0]
+            self.assertIn("filter=statuscode%3A%28301%7C403%29", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--include-status", "301,403"])
+            self.assertEqual(rc, 0)
+            req = m.call_args[0][0]
+            self.assertIn("filter=statuscode%3A%28301%7C403%29", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_rejects_bad_status(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--include-status", "abc"])
+        self.assertEqual(cm.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

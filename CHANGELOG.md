@@ -4,6 +4,9 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--include-status` option: comma-separated HTTP status codes to include in
+  the CDX query (default: 200) — e.g. `--include-status 301,403` also mines
+  redirect and forbidden captures; codes are OR-ed with one CDX regex filter.
 - `--json` output mode: prints the full bucketed report (all URLs, JS files,
   URLs with params, param names, interesting files) as machine-readable JSON;
   `--output` writes the JSON report when combined with `--json`. The four

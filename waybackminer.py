@@ -26,13 +26,43 @@ INTERESTING_EXTS = {
 }
 
 
-def fetch_cdx(domain, limit=20000, timeout=120):
-    """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts."""
+def parse_statuses(value):
+    """Parse '--include-status 301,403' into a sorted list of unique ints.
+
+    Raises argparse.ArgumentTypeError on bad input so argparse exits 2
+    with a usage error (fail fast, like the other CLI validations).
+    """
+    codes = []
+    for token in value.split(","):
+        token = token.strip()
+        if not token.isdigit():
+            raise argparse.ArgumentTypeError(
+                f"invalid status code {token!r}: expected a number 100-599")
+        code = int(token)
+        if not 100 <= code <= 599:
+            raise argparse.ArgumentTypeError(
+                f"invalid status code {code}: expected 100-599")
+        codes.append(code)
+    if not codes:
+        raise argparse.ArgumentTypeError("expected at least one status code")
+    return sorted(set(codes))
+
+
+def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,)):
+    """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
+
+    statuses: HTTP status codes to include in the CDX filter (default: only
+    200). Multiple codes are OR-ed with a single regex-alternation filter
+    (e.g. statuscode:(301|403)), so one CDX request covers them all.
+    """
+    expr = "|".join(str(s) for s in statuses)
+    if len(statuses) > 1:
+        expr = f"({expr})"
     params = {
         "url": f"{domain}/*",
         "output": "json",
         "fl": "timestamp,original,statuscode,mimetype",
-        "filter": "statuscode:200",
+        "filter": f"statuscode:{expr}",
         "collapse": "urlkey",
         "limit": str(limit),
     }
@@ -155,6 +185,11 @@ def main(argv=None):
     ap.add_argument("domain", help="domain to mine, e.g. example.com")
     ap.add_argument("--limit", type=int, default=20000,
                     help="max CDX rows to fetch (default: 20000)")
+    ap.add_argument("--include-status", type=parse_statuses, default=[200],
+                    metavar="CODES",
+                    help="comma-separated HTTP status codes to include in the "
+                         "CDX query (default: 200, e.g. '301,403' to also mine "
+                         "redirect and forbidden captures)")
     modes = ap.add_mutually_exclusive_group()
     modes.add_argument("--js-only", action="store_true",
                        help="print only JavaScript file URLs")
@@ -168,7 +203,8 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     try:
-        entries = fetch_cdx(args.domain, limit=args.limit)
+        entries = fetch_cdx(args.domain, limit=args.limit,
+                            statuses=args.include_status)
     except Exception as exc:  # noqa: BLE001 - report cleanly for CLI use
         print(f"error: could not query the CDX API: {exc}", file=sys.stderr)
         return 1
