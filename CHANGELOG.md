@@ -4,6 +4,10 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Subdomain rollup: new `subdomains` bucket counting archived (deduped) URLs
+  per host (sorted by count desc, then hostname; also in `--json` output);
+  the text summary shows the subdomain count plus a top-20 section, and the
+  new `--subdomains-only` mode prints `host: count` lines for piping.
 - `--include-status` option: comma-separated HTTP status codes to include in
   the CDX query (default: 200) — e.g. `--include-status 301,403` also mines
   redirect and forbidden captures; codes are OR-ed with one CDX regex filter.

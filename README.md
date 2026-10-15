@@ -11,6 +11,7 @@ touches the target itself.
 ## What it finds
 
 - **All archived URLs** for a domain (deduped, sorted)
+- **Per-subdomain URL counts** — see where the archived surface actually lives
 - **First-seen / last-seen timestamps** per URL, from the CDX capture history
 - **JavaScript files** — prime recon targets
 - **URLs with query parameters** — injection surface
@@ -33,6 +34,7 @@ python3 waybackminer.py example.com --js-only
 python3 waybackminer.py example.com --params-only
 python3 waybackminer.py example.com --interesting-only
 python3 waybackminer.py example.com --json
+python3 waybackminer.py example.com --subdomains-only  # per-host URL counts
 python3 waybackminer.py example.com --limit 5000 -o urls.txt
 python3 waybackminer.py example.com --include-status 301,403  # also mine redirect/forbidden captures
 ```
@@ -49,6 +51,7 @@ Archived URLs : 137
 JS files      : 6
 With params   : 41
 Interesting   : 3
+Subdomains    : 4
 
 [!] Interesting files:
   http://target.example/backup.sql
@@ -64,6 +67,11 @@ Interesting   : 3
   http://target.example/static/app.js
   http://target.example/static/vendor/analytics.js
   ...
+
+[#] Subdomains (top 20):
+      89  target.example
+      24  blog.target.example
+  ...
 ```
 
 With `--js-only`, the tool prints just the JS URL list (one per line) so you
@@ -72,6 +80,9 @@ unique query-parameter names across the domain (sorted, one per line) — a
 ready seed list for wordlist builders like ParamMiner. With
 `--interesting-only`, it prints just the interesting-file URLs (`.bak`,
 `.sql`, `.env`, …), one per line, for piping into downloaders or scanners.
+With `--subdomains-only`, it prints per-subdomain archived-URL counts
+(`host: count`, sorted by count) — a quick read of where the archived
+surface actually lives.
 
 ```console
 $ python3 waybackminer.py target.example --params-only

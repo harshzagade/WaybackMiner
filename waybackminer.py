@@ -92,6 +92,7 @@ def analyze(entries):
     param_names = set()
     first_seen, last_seen = {}, {}
     buckets = {"all": [], "js": [], "params": [], "param_names": [], "interesting": []}
+    rollup = {}
     for e in entries:
         url = e.get("original", "")
         if not url:
@@ -108,6 +109,9 @@ def analyze(entries):
         seen.add(url)
         buckets["all"].append(url)
         first_seen[url] = last_seen[url] = ts
+        host = urllib.parse.urlparse(url).hostname
+        if host:
+            rollup[host] = rollup.get(host, 0) + 1
         ext = _ext(url)
         if ext == ".js" or e.get("mimetype", "").find("javascript") != -1:
             buckets["js"].append(url)
@@ -121,8 +125,12 @@ def analyze(entries):
     buckets["param_names"] = sorted(param_names)
     buckets["timeline"] = {u: {"first_seen": first_seen[u], "last_seen": last_seen[u]}
                            for u in sorted(first_seen)}
+    # subdomain rollup: host -> count of archived (deduped) URLs,
+    # sorted by count desc then hostname asc
+    buckets["subdomains"] = {h: rollup[h] for h in
+                             sorted(rollup, key=lambda h: (-rollup[h], h))}
     for k in buckets:
-        if k not in ("param_names", "timeline"):
+        if k not in ("param_names", "timeline", "subdomains"):
             buckets[k].sort()
     return buckets
 
@@ -142,7 +150,7 @@ def render_json(buckets):
 
 
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
-               json_only=False):
+               json_only=False, subdomains_only=False):
     if json_only:
         print(render_json(buckets))
         return
@@ -158,10 +166,15 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         for u in buckets["interesting"]:
             print(u)
         return
+    if subdomains_only:
+        for host, count in buckets["subdomains"].items():
+            print(f"{host}: {count}")
+        return
     print(f"Archived URLs : {len(buckets['all'])}")
     print(f"JS files      : {len(buckets['js'])}")
     print(f"With params   : {len(buckets['params'])}")
     print(f"Interesting   : {len(buckets['interesting'])}")
+    print(f"Subdomains    : {len(buckets['subdomains'])}")
     window = capture_window(buckets["timeline"])
     if window:
         print(f"Capture window: {window[0]} .. {window[1]}")
@@ -177,6 +190,10 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         print("\n[*] JS files (first 20):")
         for u in buckets["js"][:20]:
             print(f"  {u}")
+    if buckets["subdomains"]:
+        print("\n[#] Subdomains (top 20):")
+        for host, count in list(buckets["subdomains"].items())[:20]:
+            print(f"  {count:>6}  {host}")
 
 
 def main(argv=None):
@@ -199,6 +216,9 @@ def main(argv=None):
                        help="print only interesting-file URLs (one per line)")
     modes.add_argument("--json", action="store_true",
                        help="print the full report as machine-readable JSON")
+    modes.add_argument("--subdomains-only", action="store_true",
+                       help="print per-subdomain archived-URL counts "
+                            "(sorted by count, one per line)")
     ap.add_argument("--output", "-o", help="write full URL list to file")
     args = ap.parse_args(argv)
 
@@ -214,7 +234,8 @@ def main(argv=None):
 
     buckets = analyze(entries)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
-                 interesting_only=args.interesting_only, json_only=args.json)
+                 interesting_only=args.interesting_only, json_only=args.json,
+                 subdomains_only=args.subdomains_only)
     if args.output:
         with open(args.output, "w", encoding="utf-8") as fh:
             if args.json:

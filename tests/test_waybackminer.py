@@ -137,12 +137,13 @@ class TestCli(unittest.TestCase):
         self.assertEqual(rc, 0)
         data = json.loads(buf.getvalue())
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
-                                     "interesting", "timeline"})
+                                     "interesting", "timeline", "subdomains"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
         self.assertIn("http://example.com/backup.sql", data["interesting"])
         self.assertEqual(data["all"], sorted(data["all"]))
+        self.assertEqual(data["subdomains"], {"example.com": 5})
 
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_json_output_flag_writes_json_report(self, _):
@@ -278,6 +279,87 @@ class TestIncludeStatus(unittest.TestCase):
         with mock.patch("sys.stderr", err):
             with self.assertRaises(SystemExit) as cm:
                 wm.main(["example.com", "--include-status", "abc"])
+        self.assertEqual(cm.exception.code, 2)
+
+
+class TestSubdomainRollup(unittest.TestCase):
+    ENTRIES = [
+        {"original": "http://example.com/a", "statuscode": "200",
+         "mimetype": "text/html"},
+        {"original": "http://blog.example.com/p", "statuscode": "200",
+         "mimetype": "text/html"},
+        {"original": "http://blog.example.com/q", "statuscode": "200",
+         "mimetype": "text/html"},
+        {"original": "http://shop.example.com/", "statuscode": "200",
+         "mimetype": "text/html"},
+        {"original": "http://blog.example.com/p", "statuscode": "200",
+         "mimetype": "text/html"},  # dup: counted once
+        {"original": "HTTP://EXAMPLE.COM:8080/up", "statuscode": "200",
+         "mimetype": "text/html"},  # host normalized: port stripped, lowercased
+        {"original": "not a url at all", "statuscode": "200",
+         "mimetype": "text/html"},  # no host: skipped from rollup
+        {"original": "", "statuscode": "200",
+         "mimetype": "text/html"},  # empty: skipped entirely
+    ]
+
+    def test_counts_deduped_urls_per_host(self):
+        buckets = wm.analyze(self.ENTRIES)
+        self.assertEqual(buckets["subdomains"],
+                         {"blog.example.com": 2, "example.com": 2,
+                          "shop.example.com": 1})
+
+    def test_sorted_by_count_then_host(self):
+        buckets = wm.analyze(self.ENTRIES)
+        self.assertEqual(list(buckets["subdomains"]),
+                         ["blog.example.com", "example.com",
+                          "shop.example.com"])
+
+    def test_empty_entries_gives_empty_rollup(self):
+        self.assertEqual(wm.analyze([])["subdomains"], {})
+
+    def test_subdomains_only_output(self):
+        buckets = wm.analyze(self.ENTRIES)
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets, subdomains_only=True)
+        self.assertEqual(buf.getvalue().splitlines(),
+                         ["blog.example.com: 2", "example.com: 2",
+                          "shop.example.com: 1"])
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_summary_shows_subdomain_count(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com"])
+        self.assertEqual(rc, 0)
+        self.assertIn("Subdomains    : 1", buf.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_subdomain_section_lists_top_hosts(self, _):
+        entries = [
+            {"original": f"http://sub{i}.example.com/x", "statuscode": "200",
+             "mimetype": "text/html"}
+            for i in range(25)
+        ] + [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "mimetype": "text/html"},
+            {"original": "http://example.com/b", "statuscode": "200",
+             "mimetype": "text/html"},
+        ]
+        buckets = wm.analyze(entries)
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[#] Subdomains (top 20):", out)
+        self.assertIn("       2  example.com", out)  # count-desc sorting
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_subdomains_only_conflicts_with_json(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--subdomains-only", "--json"])
         self.assertEqual(cm.exception.code, 2)
 
 
