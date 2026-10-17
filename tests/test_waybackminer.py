@@ -470,3 +470,50 @@ class TestExtCli(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestInterestingExtsOverride(unittest.TestCase):
+    ENTRIES = [
+        {"original": "http://example.com/backup.sql", "statuscode": "200",
+         "mimetype": "application/sql"},
+        {"original": "http://example.com/app.js", "statuscode": "200",
+         "mimetype": "application/javascript"},
+        {"original": "http://example.com/key.pem", "statuscode": "200",
+         "mimetype": "text/plain"},
+    ]
+
+    def test_default_set_unchanged(self):
+        buckets = wm.analyze(self.ENTRIES)
+        self.assertEqual(buckets["interesting"],
+                         ["http://example.com/backup.sql"])
+
+    def test_override_replaces_set(self):
+        buckets = wm.analyze(self.ENTRIES, interesting_exts=[".pem"])
+        self.assertEqual(buckets["interesting"],
+                         ["http://example.com/key.pem"])
+
+    def test_override_composes_with_ext_filter(self):
+        buckets = wm.analyze(self.ENTRIES, include_exts=[".js", ".sql"],
+                             interesting_exts=[".pem"])
+        self.assertEqual(buckets["all"],
+                         ["http://example.com/app.js",
+                          "http://example.com/backup.sql"])
+        self.assertEqual(buckets["interesting"], [])
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--interesting-exts", "js"])
+        self.assertEqual(rc, 0)
+        self.assertIn("Interesting   : 1", buf.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_composes_with_ext(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--ext", "js", "--interesting-exts", "sql"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("Archived URLs : 1", out)
+        self.assertIn("Interesting   : 0", out)

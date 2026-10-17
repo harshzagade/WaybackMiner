@@ -9,6 +9,9 @@ All notable changes to WaybackMiner are documented here.
   (`--no-ext bak,log`, applied after `--ext`); `--ext` also drops
   extensionless URLs, so the filter is exact. Composes with all output modes.
   Malformed tokens fail fast with argparse exit 2.
+- `--interesting-exts` override: replace the built-in interesting-file
+  extension set with a custom comma-separated list (same normalization as
+  `--ext`), e.g. `--interesting-exts env,key,pem` for a secrets-focused run.
 - Subdomain rollup: new `subdomains` bucket counting archived (deduped) URLs
   per host (sorted by count desc, then hostname; also in `--json` output);
   the text summary shows the subdomain count plus a top-20 section, and the

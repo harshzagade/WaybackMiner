@@ -39,6 +39,7 @@ python3 waybackminer.py example.com --limit 5000 -o urls.txt
 python3 waybackminer.py example.com --include-status 301,403  # also mine redirect/forbidden captures
 python3 waybackminer.py example.com --ext php,js       # keep only .php/.js URLs
 python3 waybackminer.py example.com --no-ext bak,log   # drop backup/log captures
+python3 waybackminer.py example.com --interesting-exts env,key,pem  # custom interesting set
 ```
 
 ## Sample run

@@ -108,7 +108,8 @@ def _ext(url):
     return path[dot:].lower() if dot > slash else ""
 
 
-def analyze(entries, include_exts=None, exclude_exts=None):
+def analyze(entries, include_exts=None, exclude_exts=None,
+            interesting_exts=None):
     """Split entries into js / params / param_names / interesting / all buckets
     (deduped, sorted), plus a first_seen/last_seen timeline per URL from the
     CDX `timestamp` field (timestamps are zero-padded YYYYMMDDHHMMSS, so
@@ -116,11 +117,15 @@ def analyze(entries, include_exts=None, exclude_exts=None):
 
     include_exts: keep only entries whose path extension is in this set
     (extensionless URLs are dropped). exclude_exts: drop entries whose
-    extension is in this set, applied after include_exts. Both default to
-    None, meaning no filtering.
+    extension is in this set, applied after include_exts. interesting_exts:
+    override the hard-coded INTERESTING_EXTS set used for the
+    interesting-files bucket. All default to None, meaning no filtering and
+    the built-in interesting set.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
+    interesting = (set(interesting_exts) if interesting_exts is not None
+                   else INTERESTING_EXTS)
     seen = set()
     param_names = set()
     first_seen, last_seen = {}, {}
@@ -157,7 +162,7 @@ def analyze(entries, include_exts=None, exclude_exts=None):
             buckets["params"].append(url)
             for name, _value in urllib.parse.parse_qsl(query, keep_blank_values=True):
                 param_names.add(name)
-        if ext in INTERESTING_EXTS:
+        if ext in interesting:
             buckets["interesting"].append(url)
     buckets["param_names"] = sorted(param_names)
     buckets["timeline"] = {u: {"first_seen": first_seen[u], "last_seen": last_seen[u]}
@@ -266,6 +271,11 @@ def main(argv=None):
                     default=None, metavar="EXTS",
                     help="comma-separated file extensions to drop, e.g. "
                          "'bak,log'; applied after --ext")
+    ap.add_argument("--interesting-exts", dest="interesting_exts",
+                    type=parse_extensions, default=None, metavar="EXTS",
+                    help="override the built-in interesting-file extension set, "
+                         "e.g. '--interesting-exts env,key,pem' for a "
+                         "secrets-focused run")
     args = ap.parse_args(argv)
 
     try:
@@ -278,7 +288,9 @@ def main(argv=None):
         print("no archived URLs found for this domain.")
         return 0
 
-    buckets = analyze(entries, include_exts=args.ext, exclude_exts=args.no_ext)
+    buckets = analyze(entries, include_exts=args.ext,
+                      exclude_exts=args.no_ext,
+                      interesting_exts=args.interesting_exts)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
                  subdomains_only=args.subdomains_only)
