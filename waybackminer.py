@@ -48,6 +48,31 @@ def parse_statuses(value):
     return sorted(set(codes))
 
 
+def parse_extensions(value):
+    """Parse '--ext php,js' into a sorted list of normalized '.ext' strings.
+
+    Bare names gain a leading dot, everything is lowercased. Raises
+    argparse.ArgumentTypeError on bad input so argparse exits 2 with a
+    usage error (fail fast, like the other CLI validations).
+    """
+    exts = []
+    for token in value.split(","):
+        token = token.strip().lower()
+        if not token:
+            raise argparse.ArgumentTypeError(
+                "empty extension in --ext: expected e.g. 'php,js'")
+        if not token.startswith("."):
+            token = "." + token
+        body = token[1:]
+        if not body or not all(c.isalnum() or c in "-_" for c in body):
+            raise argparse.ArgumentTypeError(
+                f"invalid extension {token!r}: expected e.g. 'php' or '.php'")
+        exts.append(token)
+    if not exts:
+        raise argparse.ArgumentTypeError("expected at least one extension")
+    return sorted(set(exts))
+
+
 def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,)):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
 
@@ -83,11 +108,19 @@ def _ext(url):
     return path[dot:].lower() if dot > slash else ""
 
 
-def analyze(entries):
+def analyze(entries, include_exts=None, exclude_exts=None):
     """Split entries into js / params / param_names / interesting / all buckets
     (deduped, sorted), plus a first_seen/last_seen timeline per URL from the
     CDX `timestamp` field (timestamps are zero-padded YYYYMMDDHHMMSS, so
-    lexicographic min/max is chronological)."""
+    lexicographic min/max is chronological).
+
+    include_exts: keep only entries whose path extension is in this set
+    (extensionless URLs are dropped). exclude_exts: drop entries whose
+    extension is in this set, applied after include_exts. Both default to
+    None, meaning no filtering.
+    """
+    inc = set(include_exts or ())
+    exc = set(exclude_exts or ())
     seen = set()
     param_names = set()
     first_seen, last_seen = {}, {}
@@ -96,6 +129,11 @@ def analyze(entries):
     for e in entries:
         url = e.get("original", "")
         if not url:
+            continue
+        ext = _ext(url)
+        if inc and ext not in inc:
+            continue
+        if ext and ext in exc:
             continue
         ts = e.get("timestamp") or None
         if url in seen:
@@ -112,7 +150,6 @@ def analyze(entries):
         host = urllib.parse.urlparse(url).hostname
         if host:
             rollup[host] = rollup.get(host, 0) + 1
-        ext = _ext(url)
         if ext == ".js" or e.get("mimetype", "").find("javascript") != -1:
             buckets["js"].append(url)
         query = urllib.parse.urlparse(url).query
@@ -220,6 +257,15 @@ def main(argv=None):
                        help="print per-subdomain archived-URL counts "
                             "(sorted by count, one per line)")
     ap.add_argument("--output", "-o", help="write full URL list to file")
+    ap.add_argument("--ext", type=parse_extensions, default=None,
+                    metavar="EXTS",
+                    help="comma-separated file extensions to keep, e.g. "
+                         "'php,js' (bare or dotted); URLs with other "
+                         "extensions (and extensionless URLs) are dropped")
+    ap.add_argument("--no-ext", dest="no_ext", type=parse_extensions,
+                    default=None, metavar="EXTS",
+                    help="comma-separated file extensions to drop, e.g. "
+                         "'bak,log'; applied after --ext")
     args = ap.parse_args(argv)
 
     try:
@@ -232,7 +278,7 @@ def main(argv=None):
         print("no archived URLs found for this domain.")
         return 0
 
-    buckets = analyze(entries)
+    buckets = analyze(entries, include_exts=args.ext, exclude_exts=args.no_ext)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
                  subdomains_only=args.subdomains_only)

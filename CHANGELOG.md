@@ -4,6 +4,11 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--ext` / `--no-ext` extension filters: comma-separated extensions to keep
+  (`--ext php,js` — bare or dotted, case-insensitive) or drop
+  (`--no-ext bak,log`, applied after `--ext`); `--ext` also drops
+  extensionless URLs, so the filter is exact. Composes with all output modes.
+  Malformed tokens fail fast with argparse exit 2.
 - Subdomain rollup: new `subdomains` bucket counting archived (deduped) URLs
   per host (sorted by count desc, then hostname; also in `--json` output);
   the text summary shows the subdomain count plus a top-20 section, and the

@@ -1,4 +1,5 @@
 """Tests for WaybackMiner. HTTP is mocked - no network access."""
+import argparse
 import io
 import json
 import unittest
@@ -360,6 +361,110 @@ class TestSubdomainRollup(unittest.TestCase):
         with mock.patch("sys.stderr", err):
             with self.assertRaises(SystemExit) as cm:
                 wm.main(["example.com", "--subdomains-only", "--json"])
+        self.assertEqual(cm.exception.code, 2)
+
+
+
+
+class TestParseExtensions(unittest.TestCase):
+    def test_normalizes_bare_and_dotted(self):
+        self.assertEqual(wm.parse_extensions("php,.JS"),
+                         [".js", ".php"])  # sorted, lowercased, dotted
+
+    def test_dedupes_case_variants(self):
+        self.assertEqual(wm.parse_extensions("js,JS,.js"), [".js"])
+
+    def test_empty_token_fails(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            wm.parse_extensions("php,,js")
+
+    def test_empty_value_fails(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            wm.parse_extensions("")
+
+    def test_bad_characters_fail(self):
+        for bad in ("..", ".", "p hp", "a/b", ".tar.gz"):
+            with self.assertRaises(argparse.ArgumentTypeError, msg=bad):
+                wm.parse_extensions(bad)
+
+
+class TestExtFilter(unittest.TestCase):
+    ENTRIES = [
+        {"original": "http://example.com/app.js", "statuscode": "200",
+         "mimetype": "application/javascript"},
+        {"original": "http://example.com/login.php", "statuscode": "200",
+         "mimetype": "text/html"},
+        {"original": "http://example.com/backup.bak", "statuscode": "200",
+         "mimetype": "text/html"},
+        {"original": "http://example.com/", "statuscode": "200",
+         "mimetype": "text/html"},
+        {"original": "http://example.com/mime-js-no-ext", "statuscode": "200",
+         "mimetype": "application/javascript"},
+    ]
+
+    def test_include_keeps_matching_exts_only(self):
+        buckets = wm.analyze(self.ENTRIES, include_exts=[".js"])
+        self.assertEqual(buckets["all"], ["http://example.com/app.js"])
+
+    def test_include_drops_extensionless_urls(self):
+        buckets = wm.analyze(self.ENTRIES, include_exts=[".js"])
+        self.assertNotIn("http://example.com/", buckets["all"])
+        self.assertNotIn("http://example.com/mime-js-no-ext", buckets["all"])
+
+    def test_include_matches_case_insensitively(self):
+        entries = [{"original": "http://example.com/STYLE.CSS",
+                    "statuscode": "200", "mimetype": "text/css"}]
+        self.assertEqual(wm.analyze(entries, include_exts=[".css"])["all"],
+                         ["http://example.com/STYLE.CSS"])
+
+    def test_exclude_drops_matching_exts(self):
+        buckets = wm.analyze(self.ENTRIES, exclude_exts=[".bak"])
+        self.assertNotIn("http://example.com/backup.bak", buckets["all"])
+        self.assertIn("http://example.com/app.js", buckets["all"])
+
+    def test_exclude_leaves_extensionless_urls(self):
+        buckets = wm.analyze(self.ENTRIES, exclude_exts=[".bak"])
+        self.assertIn("http://example.com/", buckets["all"])
+
+    def test_include_then_exclude(self):
+        buckets = wm.analyze(self.ENTRIES, include_exts=[".js", ".php"],
+                             exclude_exts=[".php"])
+        self.assertEqual(buckets["all"], ["http://example.com/app.js"])
+
+    def test_no_filters_by_default(self):
+        buckets = wm.analyze(self.ENTRIES)
+        self.assertEqual(len(buckets["all"]), 5)
+
+    def test_filtered_entries_do_not_pollute_other_buckets(self):
+        buckets = wm.analyze(self.ENTRIES, include_exts=[".js"])
+        self.assertEqual(buckets["interesting"], [])
+        self.assertEqual(buckets["subdomains"], {"example.com": 1})
+
+
+class TestExtCli(unittest.TestCase):
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_ext_filters_cli_output(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--ext", "js"])
+        self.assertEqual(rc, 0)
+        self.assertIn("Archived URLs : 1", buf.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_no_ext_filters_cli_output(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--no-ext", "sql,bak"])
+        self.assertEqual(rc, 0)
+        out = buf.getvalue()
+        self.assertIn("Archived URLs : 3", out)
+        self.assertIn("Interesting   : 0", out)
+
+    def test_invalid_ext_exits_2(self):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--ext", ""])
         self.assertEqual(cm.exception.code, 2)
 
 
