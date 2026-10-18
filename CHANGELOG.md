@@ -4,6 +4,12 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--mimetype` option: comma-separated mimetypes to include in the CDX query
+  (`--mimetype text/html` exact, `--mimetype image/` or `--mimetype image`
+  for any subtype); values are OR-ed with one CDX regex filter
+  (`mimetype:(text/.*|image/png)`), so one request covers them all.
+  Malformed values fail fast with argparse exit 2. Composes with
+  `--include-status` (both filters are sent as separate CDX `filter` params).
 - `--ext` / `--no-ext` extension filters: comma-separated extensions to keep
   (`--ext php,js` — bare or dotted, case-insensitive) or drop
   (`--no-ext bak,log`, applied after `--ext`); `--ext` also drops

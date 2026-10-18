@@ -12,6 +12,7 @@ never touches the target itself.
 """
 import argparse
 import json
+import re
 import sys
 import urllib.parse
 import urllib.request
@@ -48,6 +49,31 @@ def parse_statuses(value):
     return sorted(set(codes))
 
 
+_MIMETYPE_RE = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.\-+]*(/[a-z0-9!#$&^_.\-+]+)?/?$")
+
+
+def parse_mimetypes(value):
+    """Parse '--mimetype text/html,image/' into a sorted list of normalized
+    mimetype prefixes/types.
+
+    Each token may be a full 'type/subtype' (exact match), a 'type/' prefix,
+    or a bare 'type' (equivalent to 'type/'). Normalized to lowercase.
+    Raises argparse.ArgumentTypeError on bad input so argparse exits 2
+    with a usage error (fail fast, like the other CLI validations).
+    """
+    mts = []
+    for token in value.split(","):
+        token = token.strip().lower()
+        if not token or not _MIMETYPE_RE.match(token):
+            raise argparse.ArgumentTypeError(
+                f"invalid mimetype {token!r}: expected e.g. "
+                "'text/html', 'image/', or 'image'")
+        mts.append(token)
+    if not mts:
+        raise argparse.ArgumentTypeError("expected at least one mimetype")
+    return sorted(set(mts))
+
+
 def parse_extensions(value):
     """Parse '--ext php,js' into a sorted list of normalized '.ext' strings.
 
@@ -73,24 +99,41 @@ def parse_extensions(value):
     return sorted(set(exts))
 
 
-def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,)):
+def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
+               mimetypes=None):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
 
     statuses: HTTP status codes to include in the CDX filter (default: only
     200). Multiple codes are OR-ed with a single regex-alternation filter
     (e.g. statuscode:(301|403)), so one CDX request covers them all.
+    mimetypes: optional list of mimetype prefixes or full types to include
+    (e.g. ['text/', 'image/png']) — OR-ed with one regex-alternation filter
+    (e.g. mimetype:(text/.*|image/png)). A value without a '/' matches any
+    subtype ('image' == 'image/'); a full 'type/subtype' matches exactly.
     """
     expr = "|".join(str(s) for s in statuses)
     if len(statuses) > 1:
         expr = f"({expr})"
-    params = {
-        "url": f"{domain}/*",
-        "output": "json",
-        "fl": "timestamp,original,statuscode,mimetype",
-        "filter": f"statuscode:{expr}",
-        "collapse": "urlkey",
-        "limit": str(limit),
-    }
+    params = [
+        ("url", f"{domain}/*"),
+        ("output", "json"),
+        ("fl", "timestamp,original,statuscode,mimetype"),
+        ("filter", f"statuscode:{expr}"),
+        ("collapse", "urlkey"),
+        ("limit", str(limit)),
+    ]
+    if mimetypes:
+        alts = []
+        for mt in mimetypes:
+            mt = mt.strip().lower()
+            if mt.endswith("/") or "/" not in mt:
+                alts.append(re.escape(mt.rstrip("/") + "/") + ".*")
+            else:
+                alts.append(re.escape(mt))
+        expr = "|".join(alts)
+        if len(alts) > 1:
+            expr = f"({expr})"
+        params.insert(-1, ("filter", f"mimetype:{expr}"))
     url = CDX_URL + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": "WaybackMiner/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -249,6 +292,12 @@ def main(argv=None):
                     help="comma-separated HTTP status codes to include in the "
                          "CDX query (default: 200, e.g. '301,403' to also mine "
                          "redirect and forbidden captures)")
+    ap.add_argument("--mimetype", type=parse_mimetypes, default=None,
+                    metavar="TYPES",
+                    help="comma-separated mimetypes to include in the CDX "
+                         "query, e.g. 'text/html' (exact), 'image/' (any "
+                         "image), or 'image' (same as 'image/'); OR-ed with "
+                         "one CDX regex filter")
     modes = ap.add_mutually_exclusive_group()
     modes.add_argument("--js-only", action="store_true",
                        help="print only JavaScript file URLs")
@@ -280,7 +329,8 @@ def main(argv=None):
 
     try:
         entries = fetch_cdx(args.domain, limit=args.limit,
-                            statuses=args.include_status)
+                            statuses=args.include_status,
+                            mimetypes=args.mimetype)
     except Exception as exc:  # noqa: BLE001 - report cleanly for CLI use
         print(f"error: could not query the CDX API: {exc}", file=sys.stderr)
         return 1

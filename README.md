@@ -40,6 +40,7 @@ python3 waybackminer.py example.com --include-status 301,403  # also mine redire
 python3 waybackminer.py example.com --ext php,js       # keep only .php/.js URLs
 python3 waybackminer.py example.com --no-ext bak,log   # drop backup/log captures
 python3 waybackminer.py example.com --interesting-exts env,key,pem  # custom interesting set
+python3 waybackminer.py example.com --mimetype image/,application/javascript  # only image + JS captures
 ```
 
 ## Sample run

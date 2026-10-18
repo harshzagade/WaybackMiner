@@ -283,6 +283,64 @@ class TestIncludeStatus(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
 
+class TestMimetypeFilter(unittest.TestCase):
+    def test_parse_mimetypes_normalizes(self):
+        self.assertEqual(wm.parse_mimetypes("TEXT/HTML,image"),
+                         ["image", "text/html"])
+
+    def test_parse_mimetypes_rejects_bad(self):
+        for bad in ("foo bar", "///", "", "a/b/c", "text/html;level=1"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                wm.parse_mimetypes(bad)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_exact_mimetype_filter(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com", mimetypes=["text/html"])
+            req = m.call_args[0][0]
+            self.assertIn("filter=mimetype%3Atext%2Fhtml", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_prefix_mimetype_filter(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com", mimetypes=["image/"])
+            req = m.call_args[0][0]
+            self.assertIn("filter=mimetype%3Aimage%2F.%2A", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_multiple_mimetypes_or_filter(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com", mimetypes=["image/", "text/html"])
+            req = m.call_args[0][0]
+            self.assertIn("filter=mimetype%3A%28image%2F.%2A%7Ctext%2Fhtml%29",
+                          req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_no_mimetype_filter_by_default(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com")
+            req = m.call_args[0][0]
+            self.assertNotIn("filter=mimetype", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_mimetype_flows_through(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--mimetype", "text/html"])
+            self.assertEqual(rc, 0)
+            req = m.call_args[0][0]
+            self.assertIn("filter=mimetype%3Atext%2Fhtml", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_rejects_bad_mimetype(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--mimetype", "not a type"])
+        self.assertEqual(cm.exception.code, 2)
+
+
 class TestSubdomainRollup(unittest.TestCase):
     ENTRIES = [
         {"original": "http://example.com/a", "statuscode": "200",
