@@ -341,6 +341,41 @@ class TestMimetypeFilter(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
 
+class TestCollapse(unittest.TestCase):
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_default_collapse_is_urlkey(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com")
+            req = m.call_args[0][0]
+            self.assertIn("collapse=urlkey", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_digest_collapse(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com", collapse="digest")
+            req = m.call_args[0][0]
+            self.assertIn("collapse=digest", req.full_url)
+            self.assertNotIn("collapse=urlkey", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_collapse_flows_through(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--collapse", "digest"])
+            self.assertEqual(rc, 0)
+            req = m.call_args[0][0]
+            self.assertIn("collapse=digest", req.full_url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_rejects_bad_collapse(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--collapse", "bogus"])
+        self.assertEqual(cm.exception.code, 2)
+
+
 class TestSubdomainRollup(unittest.TestCase):
     ENTRIES = [
         {"original": "http://example.com/a", "statuscode": "200",

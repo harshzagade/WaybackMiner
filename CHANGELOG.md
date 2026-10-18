@@ -4,6 +4,10 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--collapse` option: expose the CDX collapse mode instead of the hard-coded
+  `urlkey` — `urlkey` (default, one row per URL; the per-URL
+  first_seen/last_seen timeline needs this) or `digest` (one row per unique
+  response body, merging URLs that served identical content).
 - `--mimetype` option: comma-separated mimetypes to include in the CDX query
   (`--mimetype text/html` exact, `--mimetype image/` or `--mimetype image`
   for any subtype); values are OR-ed with one CDX regex filter

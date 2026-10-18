@@ -100,7 +100,7 @@ def parse_extensions(value):
 
 
 def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
-               mimetypes=None):
+               mimetypes=None, collapse="urlkey"):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
 
     statuses: HTTP status codes to include in the CDX filter (default: only
@@ -110,6 +110,10 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
     (e.g. ['text/', 'image/png']) — OR-ed with one regex-alternation filter
     (e.g. mimetype:(text/.*|image/png)). A value without a '/' matches any
     subtype ('image' == 'image/'); a full 'type/subtype' matches exactly.
+    collapse: CDX collapse mode — 'urlkey' (default, one row per URL; the
+    per-URL first_seen/last_seen timeline needs this) or 'digest' (one row
+    per unique response body — merges URLs that served identical content,
+    useful for finding how many distinct page variants were served).
     """
     expr = "|".join(str(s) for s in statuses)
     if len(statuses) > 1:
@@ -119,7 +123,7 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
         ("output", "json"),
         ("fl", "timestamp,original,statuscode,mimetype"),
         ("filter", f"statuscode:{expr}"),
-        ("collapse", "urlkey"),
+        ("collapse", collapse),
         ("limit", str(limit)),
     ]
     if mimetypes:
@@ -298,6 +302,12 @@ def main(argv=None):
                          "query, e.g. 'text/html' (exact), 'image/' (any "
                          "image), or 'image' (same as 'image/'); OR-ed with "
                          "one CDX regex filter")
+    ap.add_argument("--collapse", choices=["urlkey", "digest"],
+                    default="urlkey",
+                    help="CDX collapse mode: 'urlkey' (default, one row per "
+                         "URL — needed for the per-URL first_seen/last_seen "
+                         "timeline) or 'digest' (one row per unique response "
+                         "body; merges URLs that served identical content)")
     modes = ap.add_mutually_exclusive_group()
     modes.add_argument("--js-only", action="store_true",
                        help="print only JavaScript file URLs")
@@ -330,7 +340,8 @@ def main(argv=None):
     try:
         entries = fetch_cdx(args.domain, limit=args.limit,
                             statuses=args.include_status,
-                            mimetypes=args.mimetype)
+                            mimetypes=args.mimetype,
+                            collapse=args.collapse)
     except Exception as exc:  # noqa: BLE001 - report cleanly for CLI use
         print(f"error: could not query the CDX API: {exc}", file=sys.stderr)
         return 1
