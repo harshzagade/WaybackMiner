@@ -4,6 +4,10 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--since` / `--until` capture-date bounds: `--since 2020 --until 2024`
+  mines only that era (CDX `from`/`to` params; accepts `2020`, `202001`,
+  `20200115`, … up to a full `YYYYMMDDHHMMSS` timestamp; malformed dates and
+  `--since` after `--until` fail fast with argparse exit 2).
 - `--collapse` option: expose the CDX collapse mode instead of the hard-coded
   `urlkey` — `urlkey` (default, one row per URL; the per-URL
   first_seen/last_seen timeline needs this) or `digest` (one row per unique

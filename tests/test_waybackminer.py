@@ -610,3 +610,63 @@ class TestInterestingExtsOverride(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("Archived URLs : 1", out)
         self.assertIn("Interesting   : 0", out)
+
+
+class TestDateBounds(unittest.TestCase):
+    def test_parse_accepts_lengths(self):
+        for good in ("2020", "202001", "20200115", "2020011503",
+                     "202001150330", "20200115033045"):
+            self.assertEqual(wm.parse_date_bound(good), good)
+
+    def test_parse_rejects_bad(self):
+        for bad in ("", "abc", "202", "2020011", "20213", "20200230X",
+                    "202013", "2020-01", "20200132", "2020011524",
+                    "202001151260"):
+            with self.assertRaises(argparse.ArgumentTypeError, msg=bad):
+                wm.parse_date_bound(bad)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_from_to_params_sent(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com", since="2020", until="20240115")
+            url = m.call_args[0][0].full_url
+            self.assertIn("from=2020", url)
+            self.assertIn("to=20240115", url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_no_bounds_by_default(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com")
+            url = m.call_args[0][0].full_url
+            self.assertNotIn("from=", url)
+            self.assertNotIn("to=", url)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flags_flow_through(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--since", "202001",
+                              "--until", "2024"])
+            self.assertEqual(rc, 0)
+            url = m.call_args[0][0].full_url
+            self.assertIn("from=202001", url)
+            self.assertIn("to=2024", url)
+
+    def test_cli_since_after_until_exits_2(self):
+        with self.assertRaises(SystemExit) as cm:
+            with mock.patch("urllib.request.urlopen",
+                            side_effect=_fake_urlopen):
+                wm.main(["example.com", "--since", "2024",
+                         "--until", "2020"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_cli_mixed_lengths_ok(self):
+        # --since 2024 vs --until 2024 means "all of 2024": valid
+        with mock.patch("urllib.request.urlopen",
+                        side_effect=_fake_urlopen) as m:
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--since", "2024",
+                              "--until", "2024"])
+            self.assertEqual(rc, 0)

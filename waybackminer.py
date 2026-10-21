@@ -49,6 +49,42 @@ def parse_statuses(value):
     return sorted(set(codes))
 
 
+_DATE_BOUND_LENGTHS = (4, 6, 8, 10, 12, 14)
+
+
+def parse_date_bound(value):
+    """Parse '--since/--until 2020' into a CDX from/to date bound.
+
+    Accepts zero-padded digits in year, year+month, year+month+day, ...
+    up to a full YYYYMMDDHHMMSS timestamp (CDX from/to params accept all
+    these lengths). Ranges (month 01-12, day 01-31, hour 00-23,
+    minute/second 00-59) are sanity-checked; the string is returned as-is
+    for the CDX query. Raises argparse.ArgumentTypeError on bad input so
+    argparse exits 2 with a usage error (fail fast, like the others).
+    """
+    value = value.strip()
+    if not value.isdigit() or len(value) not in _DATE_BOUND_LENGTHS:
+        raise argparse.ArgumentTypeError(
+            f"invalid date {value!r}: expected digits like '2020', "
+            "'202001', '20200115', or '20200115000000'")
+    parts = [(4, 6, 1, 12), (6, 8, 1, 31), (8, 10, 0, 23),
+             (10, 12, 0, 59), (12, 14, 0, 59)]
+    names = {4: "month", 6: "day", 8: "hour", 10: "minute", 12: "second"}
+    for start, end, lo, hi in parts:
+        if len(value) >= end:
+            num = int(value[start:end])
+            if not lo <= num <= hi:
+                raise argparse.ArgumentTypeError(
+                    f"invalid date {value!r}: {names[start]} out of range")
+    return value
+
+
+def _padded_bound(value, fill):
+    """Pad a date bound to full-timestamp length so two bounds of different
+    lengths (e.g. '2020' vs '20200115') compare chronologically."""
+    return value.ljust(14, fill)
+
+
 _MIMETYPE_RE = re.compile(r"^[a-z0-9][a-z0-9!#$&^_.\-+]*(/[a-z0-9!#$&^_.\-+]+)?/?$")
 
 
@@ -100,7 +136,7 @@ def parse_extensions(value):
 
 
 def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
-               mimetypes=None, collapse="urlkey"):
+               mimetypes=None, collapse="urlkey", since=None, until=None):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
 
     statuses: HTTP status codes to include in the CDX filter (default: only
@@ -114,6 +150,8 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
     per-URL first_seen/last_seen timeline needs this) or 'digest' (one row
     per unique response body — merges URLs that served identical content,
     useful for finding how many distinct page variants were served).
+    since/until: optional capture-date bounds ('2020', '202001', '20200115',
+    ... up to 'YYYYMMDDHHMMSS') sent as the CDX 'from'/'to' params.
     """
     expr = "|".join(str(s) for s in statuses)
     if len(statuses) > 1:
@@ -126,6 +164,10 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
         ("collapse", collapse),
         ("limit", str(limit)),
     ]
+    if since is not None:
+        params.append(("from", since))
+    if until is not None:
+        params.append(("to", until))
     if mimetypes:
         alts = []
         for mt in mimetypes:
@@ -308,6 +350,15 @@ def main(argv=None):
                          "URL — needed for the per-URL first_seen/last_seen "
                          "timeline) or 'digest' (one row per unique response "
                          "body; merges URLs that served identical content)")
+    ap.add_argument("--since", type=parse_date_bound, default=None,
+                    metavar="DATE",
+                    help="only include captures from this date on (e.g. "
+                         "'2020', '202001', '20200115', or a full "
+                         "'YYYYMMDDHHMMSS' timestamp; CDX 'from' param)")
+    ap.add_argument("--until", type=parse_date_bound, default=None,
+                    metavar="DATE",
+                    help="only include captures up to this date (same format "
+                         "as --since; CDX 'to' param)")
     modes = ap.add_mutually_exclusive_group()
     modes.add_argument("--js-only", action="store_true",
                        help="print only JavaScript file URLs")
@@ -337,11 +388,16 @@ def main(argv=None):
                          "secrets-focused run")
     args = ap.parse_args(argv)
 
+    if (args.since is not None and args.until is not None
+            and _padded_bound(args.since, "0") > _padded_bound(args.until, "9")):
+        ap.error("--since must not be after --until")
+
     try:
         entries = fetch_cdx(args.domain, limit=args.limit,
                             statuses=args.include_status,
                             mimetypes=args.mimetype,
-                            collapse=args.collapse)
+                            collapse=args.collapse,
+                            since=args.since, until=args.until)
     except Exception as exc:  # noqa: BLE001 - report cleanly for CLI use
         print(f"error: could not query the CDX API: {exc}", file=sys.stderr)
         return 1
