@@ -138,7 +138,8 @@ class TestCli(unittest.TestCase):
         self.assertEqual(rc, 0)
         data = json.loads(buf.getvalue())
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
-                                     "interesting", "timeline", "subdomains"})
+                                     "interesting", "timeline", "subdomains",
+                                     "statuses"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -670,3 +671,61 @@ class TestDateBounds(unittest.TestCase):
                 rc = wm.main(["example.com", "--since", "2024",
                               "--until", "2024"])
             self.assertEqual(rc, 0)
+
+
+class TestStatusBreakdown(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/b", "statuscode": "301",
+             "timestamp": "20240102000000"},
+            {"original": "http://example.com/c", "statuscode": "403",
+             "timestamp": "20240103000000"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240201000000"},  # dup URL: counted once
+            {"original": "http://example.com/d",
+             "timestamp": "20240104000000"},  # no statuscode -> "?"
+        ]
+
+    def test_counts_deduped_urls_per_code(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["statuses"],
+                         {"200": 1, "301": 1, "403": 1, "?": 1})
+
+    def test_missing_statuscode_lands_under_question_mark(self):
+        buckets = wm.analyze([{"original": "http://example.com/a"}])
+        self.assertEqual(buckets["statuses"], {"?": 1})
+
+    def test_summary_shows_section_for_multiple_codes(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] Status codes", out)
+        self.assertIn(" 200", out)
+        self.assertIn(" 403", out)
+
+    def test_summary_hides_section_for_single_code(self):
+        buckets = wm.analyze([{"original": "http://example.com/a",
+                               "statuscode": "200"}])
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        self.assertNotIn("[=] Status codes", buf.getvalue())
+
+    def test_json_includes_statuses(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["statuses"]["301"], 1)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_multi_code_sample_shows_section(self, _):
+        # the mock skips the CDX status filter, so the 404 row is analyzed
+        # alongside the 200 rows: the breakdown section appears
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com"])
+        self.assertEqual(rc, 0)
+        self.assertIn("[=] Status codes", buf.getvalue())

@@ -4,6 +4,10 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Status-code breakdown: the text summary now shows a `Status codes` section
+  (deduped-URL counts per code, missing codes under `?`) whenever the query
+  spans more than one code — the same breakdown ships in the `--json` report
+  as the `statuses` key (numeric codes ascending, `?` last).
 - `--since` / `--until` capture-date bounds: `--since 2020 --until 2024`
   mines only that era (CDX `from`/`to` params; accepts `2020`, `202001`,
   `20200115`, … up to a full `YYYYMMDDHHMMSS` timestamp; malformed dates and

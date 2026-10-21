@@ -210,6 +210,11 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     override the hard-coded INTERESTING_EXTS set used for the
     interesting-files bucket. All default to None, meaning no filtering and
     the built-in interesting set.
+
+    The `statuses` bucket maps each HTTP status code to the count of deduped
+    URLs captured with it (entries with no statuscode field land under "?"),
+    so multi-code runs (--include-status 200,301,403) show where the
+    archived surface actually lives.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -220,6 +225,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     first_seen, last_seen = {}, {}
     buckets = {"all": [], "js": [], "params": [], "param_names": [], "interesting": []}
     rollup = {}
+    status_counts = {}
     for e in entries:
         url = e.get("original", "")
         if not url:
@@ -241,6 +247,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         seen.add(url)
         buckets["all"].append(url)
         first_seen[url] = last_seen[url] = ts
+        code = str(e.get("statuscode") or "?")
+        status_counts[code] = status_counts.get(code, 0) + 1
         host = urllib.parse.urlparse(url).hostname
         if host:
             rollup[host] = rollup.get(host, 0) + 1
@@ -260,8 +268,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     # sorted by count desc then hostname asc
     buckets["subdomains"] = {h: rollup[h] for h in
                              sorted(rollup, key=lambda h: (-rollup[h], h))}
+    # status breakdown: numeric codes ascending, non-numeric (e.g. "?") last
+    buckets["statuses"] = {c: status_counts[c] for c in
+                           sorted(status_counts,
+                                  key=lambda c: (0, int(c)) if c.isdigit()
+                                  else (1, c))}
     for k in buckets:
-        if k not in ("param_names", "timeline", "subdomains"):
+        if k not in ("param_names", "timeline", "subdomains", "statuses"):
             buckets[k].sort()
     return buckets
 
@@ -309,6 +322,10 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
     window = capture_window(buckets["timeline"])
     if window:
         print(f"Capture window: {window[0]} .. {window[1]}")
+    if len(buckets["statuses"]) > 1:
+        print("\n[=] Status codes (deduped URLs per code):")
+        for code, count in buckets["statuses"].items():
+            print(f"  {count:>6}  {code}")
     if buckets["interesting"]:
         print("\n[!] Interesting files:")
         for u in buckets["interesting"]:

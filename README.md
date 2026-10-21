@@ -80,6 +80,11 @@ Subdomains    : 4
   ...
 ```
 
+When `--include-status` spans several codes, the summary gains a
+`[=] Status codes` section showing how many deduped URLs were captured with
+each code (missing codes are grouped under `?`) — the same breakdown is in
+the `--json` report under the `statuses` key.
+
 With `--js-only`, the tool prints just the JS URL list (one per line) so you
 can pipe it straight into other tools. With `--params-only`, it prints the
 unique query-parameter names across the domain (sorted, one per line) — a
