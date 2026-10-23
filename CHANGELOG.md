@@ -4,6 +4,11 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Oldest-captures view: the text summary now shows a `Stale captures`
+  section listing the URLs whose `last_seen` is the oldest (top 10) — the
+  pages most likely abandoned; the same records ship in the `--json`
+  report as the `stale` key (URLs without a known capture timestamp are
+  skipped, since staleness is a date claim).
 - Path-depth rollup: the text summary now shows a `Path depths` section
   (deduped-URL counts per path depth, depth 0 = the bare host) followed by
   the ten deepest URLs, so deep admin trees stand out; the same counts ship

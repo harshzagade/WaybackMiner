@@ -124,7 +124,10 @@ $ python3 waybackminer.py target.example --json | head -8
 Every URL also carries a `timeline` entry — the first and last Wayback
 capture timestamps seen for it (`YYYYMMDDHHMMSS`, from the CDX history),
 so you can tell whether a forgotten file is still being re-crawled. The
-text summary shows the overall capture window too.
+text summary shows the overall capture window too, plus a `[~] Stale
+captures` section listing the URLs whose last capture is the oldest (the
+pages most likely abandoned); the same top-10 is in the `--json` report
+under the `stale` key.
 
 ## Screenshots
 

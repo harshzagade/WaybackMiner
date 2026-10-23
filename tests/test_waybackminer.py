@@ -139,7 +139,7 @@ class TestCli(unittest.TestCase):
         data = json.loads(buf.getvalue())
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
-                                     "statuses", "depths"})
+                                     "statuses", "depths", "stale"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -780,3 +780,65 @@ class TestUrlDepth(unittest.TestCase):
         buckets = wm.analyze(self._entries())
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["depths"], {"0": 1, "1": 1, "2": 1, "3": 1})
+
+
+class TestOldestCaptures(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/new", "statuscode": "200",
+             "timestamp": "20240105000000"},
+            {"original": "http://example.com/old", "statuscode": "200",
+             "timestamp": "20190601000000"},
+            {"original": "http://example.com/mid", "statuscode": "200",
+             "timestamp": "20230101000000"},
+            {"original": "http://example.com/new", "statuscode": "200",
+             "timestamp": "20240106000000"},  # dup: advances last_seen
+            {"original": "http://example.com/nodate", "statuscode": "200"},
+        ]
+
+    def test_orders_oldest_first(self):
+        timeline = {u: {"first_seen": f, "last_seen": f} for u, f in [
+            ("http://example.com/a", "20240101000000"),
+            ("http://example.com/b", "20190101000000"),
+            ("http://example.com/c", "20220101000000")]}
+        self.assertEqual(wm.oldest_captures(timeline),
+                         [("http://example.com/b", "20190101000000"),
+                          ("http://example.com/c", "20220101000000"),
+                          ("http://example.com/a", "20240101000000")])
+
+    def test_skips_urls_without_last_seen_and_caps_at_n(self):
+        timeline = {f"http://example.com/{i}":
+                    {"first_seen": "20200101000000",
+                     "last_seen": None if i % 2 else f"2020010{i+1}000000"}
+                    for i in range(6)}
+        got = wm.oldest_captures(timeline, n=2)
+        self.assertEqual(len(got), 2)
+        self.assertTrue(all(ts is not None for _, ts in got))
+        self.assertEqual(got[0][1], "20200101000000")
+
+    def test_analyze_stale_bucket(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["stale"],
+                         [{"url": "http://example.com/old",
+                           "last_seen": "20190601000000"},
+                          {"url": "http://example.com/mid",
+                           "last_seen": "20230101000000"},
+                          {"url": "http://example.com/new",
+                           "last_seen": "20240106000000"}])
+
+    def test_summary_shows_stale_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[~] Stale captures (oldest last_seen, first 3):", out)
+        self.assertIn("20190601000000  http://example.com/old", out)
+        # the dup's later capture advanced last_seen, so the newer row shows
+        self.assertIn("20240106000000  http://example.com/new", out)
+
+    def test_json_includes_stale(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["stale"][0]["url"], "http://example.com/old")
+        self.assertEqual(parsed["stale"][0]["last_seen"], "20190601000000")

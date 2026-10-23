@@ -229,6 +229,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     The `depths` bucket maps each URL path depth to the count of deduped
     URLs at that depth (depth 0 = the bare host), ascending, so deep
     directory trees stand out.
+
+    The `stale` bucket lists the URLs whose `last_seen` is the oldest (top
+    10, as url/last_seen records) — the pages most likely abandoned.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -293,9 +296,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     # path-depth rollup: depth -> count of archived (deduped) URLs,
     # sorted by depth ascending (depth 0 = the bare host)
     buckets["depths"] = {d: depth_counts[d] for d in sorted(depth_counts)}
+    # stale captures: the URLs whose last capture is the oldest (top 10),
+    # i.e. the pages most likely abandoned — carried as url/last_seen records
+    buckets["stale"] = [{"url": u, "last_seen": ts}
+                        for u, ts in oldest_captures(buckets["timeline"])]
     for k in buckets:
         if k not in ("param_names", "timeline", "subdomains", "statuses",
-                     "depths"):
+                     "depths", "stale"):
             buckets[k].sort()
     return buckets
 
@@ -307,6 +314,19 @@ def capture_window(timeline):
     if not firsts or not lasts:
         return None
     return min(firsts), max(lasts)
+
+
+def oldest_captures(timeline, n=10):
+    """Return the (url, last_seen) pairs with the oldest last_seen, oldest
+    first, capped at n. Timestamps are zero-padded YYYYMMDDHHMMSS, so
+    lexicographic order is chronological. URLs whose last capture timestamp
+    is unknown are skipped — staleness is a date claim, not a data-absence
+    one. Abandoned pages (oldest last_seen) are the most likely forgotten.
+    """
+    dated = [(u, v["last_seen"]) for u, v in timeline.items()
+             if v.get("last_seen")]
+    dated.sort(key=lambda pair: pair[1])
+    return dated[:n]
 
 
 def render_json(buckets):
@@ -343,6 +363,11 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
     window = capture_window(buckets["timeline"])
     if window:
         print(f"Capture window: {window[0]} .. {window[1]}")
+    if buckets["stale"]:
+        print(f"\n[~] Stale captures (oldest last_seen, "
+              f"first {len(buckets['stale'])}):")
+        for row in buckets["stale"]:
+            print(f"  {row['last_seen']}  {row['url']}")
     if len(buckets["statuses"]) > 1:
         print("\n[=] Status codes (deduped URLs per code):")
         for code, count in buckets["statuses"].items():
