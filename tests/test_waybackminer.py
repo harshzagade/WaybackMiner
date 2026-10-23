@@ -139,7 +139,7 @@ class TestCli(unittest.TestCase):
         data = json.loads(buf.getvalue())
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
-                                     "statuses"})
+                                     "statuses", "depths"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -729,3 +729,54 @@ class TestStatusBreakdown(unittest.TestCase):
             rc = wm.main(["example.com"])
         self.assertEqual(rc, 0)
         self.assertIn("[=] Status codes", buf.getvalue())
+
+
+class TestUrlDepth(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/", "statuscode": "200"},
+            {"original": "http://example.com/a", "statuscode": "200"},
+            {"original": "http://example.com/a/b/", "statuscode": "200"},
+            {"original": "http://example.com/a/b/c?q=1", "statuscode": "200"},
+            {"original": "http://example.com/a/b/c?q=1",  # dup: counted once
+             "statuscode": "200"},
+        ]
+
+    def test_depth_helper(self):
+        self.assertEqual(wm._url_depth("http://example.com/"), 0)
+        self.assertEqual(wm._url_depth("http://example.com"), 0)
+        self.assertEqual(wm._url_depth("http://example.com/a"), 1)
+        self.assertEqual(wm._url_depth("http://example.com/a/b/"), 2)
+        self.assertEqual(wm._url_depth("http://example.com/a/b?q=1#x"), 2)
+        self.assertEqual(wm._url_depth("http://example.com/a//b"), 2)
+
+    def test_depths_bucket_counts_deduped_urls(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["depths"], {0: 1, 1: 1, 2: 1, 3: 1})
+
+    def test_summary_shows_depth_section_and_deepest_urls(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] Path depths", out)
+        self.assertIn("depth 3", out)
+        self.assertIn("[#] Deepest URLs (depth 3, first 1):", out)
+        self.assertIn("http://example.com/a/b/c", out)
+
+    def test_summary_hides_deepest_list_when_flat(self):
+        # all URLs at depth 0: nothing deep to surface
+        buckets = wm.analyze([{"original": "http://example.com/"},
+                              {"original": "http://example.com/?ref=1"}])
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] Path depths", out)
+        self.assertNotIn("[#] Deepest URLs", out)
+
+    def test_json_includes_depths(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["depths"], {"0": 1, "1": 1, "2": 1, "3": 1})

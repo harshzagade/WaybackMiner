@@ -4,6 +4,10 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Path-depth rollup: the text summary now shows a `Path depths` section
+  (deduped-URL counts per path depth, depth 0 = the bare host) followed by
+  the ten deepest URLs, so deep admin trees stand out; the same counts ship
+  in the `--json` report as the `depths` key.
 - Status-code breakdown: the text summary now shows a `Status codes` section
   (deduped-URL counts per code, missing codes under `?`) whenever the query
   spans more than one code — the same breakdown ships in the `--json` report

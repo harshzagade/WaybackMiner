@@ -197,6 +197,16 @@ def _ext(url):
     return path[dot:].lower() if dot > slash else ""
 
 
+def _url_depth(url):
+    """Number of path segments in a URL (depth 0 = the bare host).
+
+    Trailing slashes are normalized away and the query string/fragment are
+    ignored, so '/a/b/' and '/a/b?x=1' both have depth 2.
+    """
+    path = urllib.parse.urlparse(url).path.rstrip("/")
+    return len([seg for seg in path.split("/") if seg])
+
+
 def analyze(entries, include_exts=None, exclude_exts=None,
             interesting_exts=None):
     """Split entries into js / params / param_names / interesting / all buckets
@@ -215,6 +225,10 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     URLs captured with it (entries with no statuscode field land under "?"),
     so multi-code runs (--include-status 200,301,403) show where the
     archived surface actually lives.
+
+    The `depths` bucket maps each URL path depth to the count of deduped
+    URLs at that depth (depth 0 = the bare host), ascending, so deep
+    directory trees stand out.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -226,6 +240,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets = {"all": [], "js": [], "params": [], "param_names": [], "interesting": []}
     rollup = {}
     status_counts = {}
+    depth_counts = {}
     for e in entries:
         url = e.get("original", "")
         if not url:
@@ -249,6 +264,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         first_seen[url] = last_seen[url] = ts
         code = str(e.get("statuscode") or "?")
         status_counts[code] = status_counts.get(code, 0) + 1
+        depth = _url_depth(url)
+        depth_counts[depth] = depth_counts.get(depth, 0) + 1
         host = urllib.parse.urlparse(url).hostname
         if host:
             rollup[host] = rollup.get(host, 0) + 1
@@ -273,8 +290,12 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                            sorted(status_counts,
                                   key=lambda c: (0, int(c)) if c.isdigit()
                                   else (1, c))}
+    # path-depth rollup: depth -> count of archived (deduped) URLs,
+    # sorted by depth ascending (depth 0 = the bare host)
+    buckets["depths"] = {d: depth_counts[d] for d in sorted(depth_counts)}
     for k in buckets:
-        if k not in ("param_names", "timeline", "subdomains", "statuses"):
+        if k not in ("param_names", "timeline", "subdomains", "statuses",
+                     "depths"):
             buckets[k].sort()
     return buckets
 
@@ -342,6 +363,17 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         print("\n[#] Subdomains (top 20):")
         for host, count in list(buckets["subdomains"].items())[:20]:
             print(f"  {count:>6}  {host}")
+    if buckets["depths"]:
+        print("\n[=] Path depths (deduped URLs per depth):")
+        for depth, count in buckets["depths"].items():
+            print(f"  {count:>6}  depth {depth}")
+        per_url = {u: _url_depth(u) for u in buckets["all"]}
+        deepest = max(per_url.values())
+        if deepest:
+            shown = [u for u in buckets["all"] if per_url[u] == deepest][:10]
+            print(f"\n[#] Deepest URLs (depth {deepest}, first {len(shown)}):")
+            for u in shown:
+                print(f"  {u}")
 
 
 def main(argv=None):

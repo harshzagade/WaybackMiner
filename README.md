@@ -85,6 +85,10 @@ When `--include-status` spans several codes, the summary gains a
 each code (missing codes are grouped under `?`) — the same breakdown is in
 the `--json` report under the `statuses` key.
 
+The summary also rolls archived URLs up by path depth (a `[=] Path depths`
+section, plus the ten deepest URLs — a fast way to spot deep admin trees),
+and the `--json` report carries the same counts under the `depths` key.
+
 With `--js-only`, the tool prints just the JS URL list (one per line) so you
 can pipe it straight into other tools. With `--params-only`, it prints the
 unique query-parameter names across the domain (sorted, one per line) — a
