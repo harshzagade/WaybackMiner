@@ -44,6 +44,7 @@ python3 waybackminer.py example.com --mimetype image/,application/javascript  # 
 python3 waybackminer.py example.com --collapse digest    # one row per unique response body
 python3 waybackminer.py example.com --since 2020 --until 2024  # mine the 2020-2024 era only
 python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  # per-bucket files for pipelines
+python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 ```
 
 ## Sample run

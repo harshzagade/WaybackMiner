@@ -4,6 +4,11 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--exclude-host` repeatable flag: drop captures under specific subdomains
+  client-side (exact hostname match, case-insensitive, ports ignored;
+  sibling subdomains are kept), applied before bucketing so every output
+  mode, the subdomain rollup, and `--json` stay consistent. Malformed
+  host values fail fast with argparse exit 2.
 - Per-bucket dump flags: `--dump-js FILE` writes the JavaScript-file URLs
   bucket and `--dump-params FILE` writes the URLs-with-parameters bucket,
   one URL per line, independent of the printed output mode (so dumps work

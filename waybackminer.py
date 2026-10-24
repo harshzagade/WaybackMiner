@@ -135,6 +135,38 @@ def parse_extensions(value):
     return sorted(set(exts))
 
 
+_HOST_RE = re.compile(r"^[a-z0-9-]+(\.[a-z0-9-]+)*$")
+
+
+def parse_exclude_host(value):
+    """Parse '--exclude-host blog.example.com' into a normalized hostname.
+
+    Case-insensitive, a trailing dot is stripped, and a port or scheme in
+    the value is ignored (matching is by hostname only). Raises
+    argparse.ArgumentTypeError on bad input so argparse exits 2 with a
+    usage error (fail fast, like the other CLI validations).
+    """
+    raw = value.strip().lower()
+    if not raw or any(c.isspace() for c in raw):
+        raise argparse.ArgumentTypeError(
+            f"invalid host {value!r}: expected e.g. 'blog.example.com'")
+    if "://" in raw:
+        host = urllib.parse.urlparse(raw).hostname
+    elif "/" in raw:
+        raise argparse.ArgumentTypeError(
+            f"invalid host {value!r}: expected a bare hostname, not a path")
+    else:
+        host = urllib.parse.urlparse("//" + raw).hostname
+    if not host:
+        raise argparse.ArgumentTypeError(
+            f"invalid host {value!r}: expected e.g. 'blog.example.com'")
+    host = host.rstrip(".")
+    if not _HOST_RE.match(host):
+        raise argparse.ArgumentTypeError(
+            f"invalid host {value!r}: expected e.g. 'blog.example.com'")
+    return host
+
+
 def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
                mimetypes=None, collapse="urlkey", since=None, until=None):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
@@ -208,7 +240,7 @@ def _url_depth(url):
 
 
 def analyze(entries, include_exts=None, exclude_exts=None,
-            interesting_exts=None):
+            interesting_exts=None, exclude_hosts=None):
     """Split entries into js / params / param_names / interesting / all buckets
     (deduped, sorted), plus a first_seen/last_seen timeline per URL from the
     CDX `timestamp` field (timestamps are zero-padded YYYYMMDDHHMMSS, so
@@ -218,8 +250,11 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     (extensionless URLs are dropped). exclude_exts: drop entries whose
     extension is in this set, applied after include_exts. interesting_exts:
     override the hard-coded INTERESTING_EXTS set used for the
-    interesting-files bucket. All default to None, meaning no filtering and
-    the built-in interesting set.
+    interesting-files bucket. exclude_hosts: drop entries whose hostname
+    (exact match, case-insensitive, ports ignored) is in this set, before
+    bucketing, so every mode, the subdomain rollup, and --json stay
+    consistent. All default to None, meaning no filtering and the
+    built-in interesting set.
 
     The `statuses` bucket maps each HTTP status code to the count of deduped
     URLs captured with it (entries with no statuscode field land under "?"),
@@ -235,6 +270,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
+    exc_hosts = {h.lower().rstrip(".") for h in (exclude_hosts or ())}
     interesting = (set(interesting_exts) if interesting_exts is not None
                    else INTERESTING_EXTS)
     seen = set()
@@ -247,6 +283,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     for e in entries:
         url = e.get("original", "")
         if not url:
+            continue
+        entry_host = urllib.parse.urlparse(url).hostname
+        if (entry_host and entry_host.lower().rstrip(".") in exc_hosts):
             continue
         ext = _ext(url)
         if inc and ext not in inc:
@@ -463,6 +502,14 @@ def main(argv=None):
                     default=None, metavar="EXTS",
                     help="comma-separated file extensions to drop, e.g. "
                          "'bak,log'; applied after --ext")
+    ap.add_argument("--exclude-host", dest="exclude_host",
+                    action="append", type=parse_exclude_host,
+                    default=None, metavar="HOST",
+                    help="repeatable: drop captures under this host, e.g. "
+                         "'--exclude-host blog.example.com' (exact hostname "
+                         "match, case-insensitive, ports ignored; sibling "
+                         "subdomains are kept); applied before bucketing so "
+                         "all modes and --json stay consistent")
     ap.add_argument("--interesting-exts", dest="interesting_exts",
                     type=parse_extensions, default=None, metavar="EXTS",
                     help="override the built-in interesting-file extension set, "
@@ -489,7 +536,8 @@ def main(argv=None):
 
     buckets = analyze(entries, include_exts=args.ext,
                       exclude_exts=args.no_ext,
-                      interesting_exts=args.interesting_exts)
+                      interesting_exts=args.interesting_exts,
+                      exclude_hosts=args.exclude_host)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
                  subdomains_only=args.subdomains_only)

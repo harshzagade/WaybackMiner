@@ -900,3 +900,61 @@ class TestBucketDumps(unittest.TestCase):
                 rc = self._run(["--dump-js", bad], tmp)
             self.assertEqual(rc, 2)
             self.assertIn("could not write", err.getvalue())
+
+
+class TestExcludeHost(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://blog.example.com/b", "statuscode": "200",
+             "timestamp": "20240102000000"},
+            {"original": "http://BLOG.example.com:8080/c", "statuscode": "200",
+             "timestamp": "20240103000000"},
+            {"original": "http://other.example.com/d", "statuscode": "200",
+             "timestamp": "20240104000000"},
+        ]
+
+    def test_drops_exact_host_only(self):
+        buckets = wm.analyze(self._entries(),
+                             exclude_hosts=["blog.example.com"])
+        self.assertEqual(buckets["all"],
+                         ["http://example.com/a",
+                          "http://other.example.com/d"])
+        # the subdomain rollup drops the excluded host too
+        self.assertNotIn("blog.example.com", buckets["subdomains"])
+
+    def test_match_is_case_insensitive_and_port_blind(self):
+        buckets = wm.analyze(self._entries(),
+                             exclude_hosts=["BLOG.EXAMPLE.COM"])
+        self.assertNotIn("http://blog.example.com/b", buckets["all"])
+        self.assertNotIn("http://BLOG.example.com:8080/c", buckets["all"])
+
+    def test_parse_normalizes_scheme_port_trailing_dot(self):
+        self.assertEqual(wm.parse_exclude_host("https://Blog.Example.COM:8080/"),
+                         "blog.example.com")
+        self.assertEqual(wm.parse_exclude_host("blog.example.com."),
+                         "blog.example.com")
+
+    def test_parse_rejects_garbage(self):
+        for bad in ["", "bad host", "a/b", "http://", "exa_mple.com"]:
+            with self.assertRaises(argparse.ArgumentTypeError):
+                wm.parse_exclude_host(bad)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "js.txt")
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--exclude-host", "example.com",
+                              "--dump-js", path])
+            self.assertEqual(rc, 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "")  # all SAMPLE hosts excluded
+
+    def test_cli_invalid_host_exits_2(self):
+        with self.assertRaises(SystemExit) as cm:
+            wm.main(["example.com", "--exclude-host", "bad host"])
+        self.assertEqual(cm.exception.code, 2)
