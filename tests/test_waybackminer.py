@@ -842,3 +842,61 @@ class TestOldestCaptures(unittest.TestCase):
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["stale"][0]["url"], "http://example.com/old")
         self.assertEqual(parsed["stale"][0]["last_seen"], "20190601000000")
+
+
+class TestBucketDumps(unittest.TestCase):
+    def _run(self, args, tmp):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            return wm.main(["example.com"] + args)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_js_writes_js_urls(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "js.txt")
+            self.assertEqual(self._run(["--dump-js", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "http://example.com/app.js\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_params_writes_param_urls_not_names(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "params.txt")
+            self.assertEqual(self._run(["--dump-params", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                # the params bucket holds URLs; --params-only names stay out
+                self.assertEqual(fh.read(),
+                                 "http://example.com/search?q=test\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_works_alongside_json_mode(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "js.txt")
+            self.assertEqual(self._run(["--json", "--dump-js", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "http://example.com/app.js\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_empty_bucket_writes_empty_file(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "js.txt")
+            # --ext php leaves no JS URLs, so the dump is empty, not an error
+            self.assertEqual(self._run(["--ext", "php", "--dump-js", path],
+                                       tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_unwritable_path_returns_2(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "missing-dir", "js.txt")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                rc = self._run(["--dump-js", bad], tmp)
+            self.assertEqual(rc, 2)
+            self.assertIn("could not write", err.getvalue())

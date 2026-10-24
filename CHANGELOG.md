@@ -4,6 +4,12 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Per-bucket dump flags: `--dump-js FILE` writes the JavaScript-file URLs
+  bucket and `--dump-params FILE` writes the URLs-with-parameters bucket,
+  one URL per line, independent of the printed output mode (so dumps work
+  alongside `--json` or the `--js-only`/`--params-only` modes; `--dump-params`
+  dumps the URLs themselves, not the parameter names `--params-only` prints).
+  An unwritable dump path fails fast with exit 2 instead of a traceback.
 - Oldest-captures view: the text summary now shows a `Stale captures`
   section listing the URLs whose `last_seen` is the oldest (top 10) — the
   pages most likely abandoned; the same records ship in the `--json`

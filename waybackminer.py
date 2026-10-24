@@ -446,6 +446,14 @@ def main(argv=None):
                        help="print per-subdomain archived-URL counts "
                             "(sorted by count, one per line)")
     ap.add_argument("--output", "-o", help="write full URL list to file")
+    ap.add_argument("--dump-js", dest="dump_js", metavar="FILE",
+                    help="write the JavaScript-file URLs bucket to FILE, one "
+                         "per line, for piping into other tools (independent "
+                         "of the printed output mode)")
+    ap.add_argument("--dump-params", dest="dump_params", metavar="FILE",
+                    help="write the URLs-with-parameters bucket to FILE, one "
+                         "per line (the URLs themselves, not the parameter "
+                         "names that --params-only prints)")
     ap.add_argument("--ext", type=parse_extensions, default=None,
                     metavar="EXTS",
                     help="comma-separated file extensions to keep, e.g. "
@@ -485,6 +493,16 @@ def main(argv=None):
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
                  subdomains_only=args.subdomains_only)
+    for path, items in ((args.dump_js, buckets["js"]),
+                        (args.dump_params, buckets["params"])):
+        if path is None:
+            continue
+        try:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("".join(u + "\n" for u in items))
+        except OSError as exc:
+            print(f"error: could not write {path}: {exc}", file=sys.stderr)
+            return 2
     if args.output:
         with open(args.output, "w", encoding="utf-8") as fh:
             if args.json:

@@ -43,6 +43,7 @@ python3 waybackminer.py example.com --interesting-exts env,key,pem  # custom int
 python3 waybackminer.py example.com --mimetype image/,application/javascript  # only image + JS captures
 python3 waybackminer.py example.com --collapse digest    # one row per unique response body
 python3 waybackminer.py example.com --since 2020 --until 2024  # mine the 2020-2024 era only
+python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  # per-bucket files for pipelines
 ```
 
 ## Sample run
