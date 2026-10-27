@@ -184,6 +184,9 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
     useful for finding how many distinct page variants were served).
     since/until: optional capture-date bounds ('2020', '202001', '20200115',
     ... up to 'YYYYMMDDHHMMSS') sent as the CDX 'from'/'to' params.
+    The CDX `digest` field is also fetched: identical digests across
+    different URLs mean the same response body was served at many paths
+    (see the `digest_clusters` bucket in analyze()).
     """
     expr = "|".join(str(s) for s in statuses)
     if len(statuses) > 1:
@@ -191,7 +194,7 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
     params = [
         ("url", f"{domain}/*"),
         ("output", "json"),
-        ("fl", "timestamp,original,statuscode,mimetype"),
+        ("fl", "timestamp,original,statuscode,mimetype,digest"),
         ("filter", f"statuscode:{expr}"),
         ("collapse", collapse),
         ("limit", str(limit)),
@@ -267,6 +270,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
 
     The `stale` bucket lists the URLs whose `last_seen` is the oldest (top
     10, as url/last_seen records) — the pages most likely abandoned.
+
+    The `digest_clusters` bucket lists groups of two or more deduped URLs
+    that share one CDX `digest` (the same response body served at many
+    paths), as digest/count/urls records sorted by group size desc then
+    digest asc. Entries with no digest (or a duplicate URL seen again)
+    contribute nothing: a URL's digest is the one from its first entry,
+    and a group of one is not a cluster.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -280,6 +290,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     rollup = {}
     status_counts = {}
     depth_counts = {}
+    digest_groups = {}
     for e in entries:
         url = e.get("original", "")
         if not url:
@@ -304,6 +315,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         seen.add(url)
         buckets["all"].append(url)
         first_seen[url] = last_seen[url] = ts
+        digest = e.get("digest") or None
+        if digest:
+            digest_groups.setdefault(digest, []).append(url)
         code = str(e.get("statuscode") or "?")
         status_counts[code] = status_counts.get(code, 0) + 1
         depth = _url_depth(url)
@@ -339,9 +353,16 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     # i.e. the pages most likely abandoned — carried as url/last_seen records
     buckets["stale"] = [{"url": u, "last_seen": ts}
                         for u, ts in oldest_captures(buckets["timeline"])]
+    # digest clusters: same response body at two or more deduped URLs,
+    # largest groups first, digest asc as the tiebreak
+    buckets["digest_clusters"] = [
+        {"digest": d, "count": len(urls), "urls": sorted(urls)}
+        for d, urls in sorted(digest_groups.items(),
+                              key=lambda kv: (-len(kv[1]), kv[0]))
+        if len(urls) >= 2]
     for k in buckets:
         if k not in ("param_names", "timeline", "subdomains", "statuses",
-                     "depths", "stale"):
+                     "depths", "stale", "digest_clusters"):
             buckets[k].sort()
     return buckets
 
@@ -438,6 +459,14 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
             print(f"\n[#] Deepest URLs (depth {deepest}, first {len(shown)}):")
             for u in shown:
                 print(f"  {u}")
+    if buckets["digest_clusters"]:
+        print("\n[=] Duplicate content (same CDX digest, multiple URLs):")
+        for cluster in buckets["digest_clusters"][:10]:
+            print(f"  {cluster['count']:>6}  {cluster['digest']}")
+            for u in cluster["urls"][:5]:
+                print(f"           {u}")
+            if len(cluster["urls"]) > 5:
+                print(f"           ... and {len(cluster['urls']) - 5} more")
 
 
 def main(argv=None):

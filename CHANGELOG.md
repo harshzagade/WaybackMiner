@@ -4,6 +4,12 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Digest dedupe cluster report: the CDX `digest` field is now fetched and
+  URLs sharing one digest (the same response body served at many paths)
+  are grouped in the `digest_clusters` bucket (digest/count/urls, largest
+  groups first; singletons and digest-less entries are not clusters) and
+  shown in a `Duplicate content` section of the text summary; the same
+  clusters ship in the `--json` report under the `digest_clusters` key.
 - `--exclude-host` repeatable flag: drop captures under specific subdomains
   client-side (exact hostname match, case-insensitive, ports ignored;
   sibling subdomains are kept), applied before bucketing so every output

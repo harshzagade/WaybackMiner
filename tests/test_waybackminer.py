@@ -139,7 +139,8 @@ class TestCli(unittest.TestCase):
         data = json.loads(buf.getvalue())
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
-                                     "statuses", "depths", "stale"})
+                                     "statuses", "depths", "stale",
+                                     "digest_clusters"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -958,3 +959,71 @@ class TestExcludeHost(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             wm.main(["example.com", "--exclude-host", "bad host"])
         self.assertEqual(cm.exception.code, 2)
+
+
+class TestDigestClusters(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "digest": "AAA"},
+            {"original": "http://example.com/b", "statuscode": "200",
+             "digest": "AAA"},
+            {"original": "http://example.com/c", "statuscode": "200",
+             "digest": "BBB"},
+            {"original": "http://example.com/d", "statuscode": "200",
+             "digest": "AAA"},
+            {"original": "http://example.com/e", "statuscode": "200"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "digest": "ZZZ"},  # dup URL: first digest wins, no extra cluster
+        ]
+
+    def test_groups_same_digest_urls(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["digest_clusters"], [
+            {"digest": "AAA", "count": 3,
+             "urls": ["http://example.com/a", "http://example.com/b",
+                      "http://example.com/d"]}])
+
+    def test_singletons_and_missing_digests_are_not_clusters(self):
+        buckets = wm.analyze(self._entries())
+        digests = [c["digest"] for c in buckets["digest_clusters"]]
+        self.assertNotIn("BBB", digests)  # only one URL
+        self.assertNotIn("ZZZ", digests)  # dup URL's second digest ignored
+
+    def test_sorted_by_count_desc_then_digest(self):
+        entries = [
+            {"original": "http://example.com/x1", "digest": "B"},
+            {"original": "http://example.com/x2", "digest": "B"},
+            {"original": "http://example.com/y1", "digest": "A"},
+            {"original": "http://example.com/y2", "digest": "A"},
+            {"original": "http://example.com/y3", "digest": "A"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual([c["digest"] for c in buckets["digest_clusters"]],
+                         ["A", "B"])
+
+    def test_summary_shows_cluster_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("Duplicate content", out)
+        self.assertIn("AAA", out)
+        self.assertIn("http://example.com/b", out)
+
+    def test_no_cluster_section_when_none(self):
+        buckets = wm.analyze([{"original": "http://example.com/a",
+                               "digest": "ONLY"}])
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        self.assertNotIn("Duplicate content", buf.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_fetch_requests_digest_field(self, _):
+        with mock.patch("urllib.request.urlopen",
+                        wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com")
+            req = m.call_args[0][0]
+            self.assertIn("digest", req.full_url)
