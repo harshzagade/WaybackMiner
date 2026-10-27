@@ -243,7 +243,8 @@ def _url_depth(url):
 
 
 def analyze(entries, include_exts=None, exclude_exts=None,
-            interesting_exts=None, exclude_hosts=None):
+            interesting_exts=None, exclude_hosts=None,
+            robots_disallow=None, robots_allow=None):
     """Split entries into js / params / param_names / interesting / all buckets
     (deduped, sorted), plus a first_seen/last_seen timeline per URL from the
     CDX `timestamp` field (timestamps are zero-padded YYYYMMDDHHMMSS, so
@@ -277,6 +278,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     digest asc. Entries with no digest (or a duplicate URL seen again)
     contribute nothing: a URL's digest is the one from its first entry,
     and a group of one is not a cluster.
+
+    robots_disallow/robots_allow: the current robots.txt patterns (from
+    parse_robots, only consulted when disallows are given). The
+    `robots_drift` bucket lists deduped archived URLs whose path (plus
+    query) is now disallowed — paths that were crawlable when archived
+    but are blocked today — as url/pattern records sorted by URL.
+    Without patterns the bucket is empty.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -291,6 +299,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     status_counts = {}
     depth_counts = {}
     digest_groups = {}
+    robots_drift = []
+    disallow_patterns = list(robots_disallow or ())
+    allow_patterns = list(robots_allow or ())
     for e in entries:
         url = e.get("original", "")
         if not url:
@@ -318,6 +329,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         digest = e.get("digest") or None
         if digest:
             digest_groups.setdefault(digest, []).append(url)
+        if disallow_patterns:
+            parsed = urllib.parse.urlparse(url)
+            path_q = parsed.path + ("?" + parsed.query if parsed.query else "")
+            blocked, pattern = robots_disallowed(path_q, disallow_patterns,
+                                                 allow_patterns)
+            if blocked:
+                robots_drift.append({"url": url, "pattern": pattern})
         code = str(e.get("statuscode") or "?")
         status_counts[code] = status_counts.get(code, 0) + 1
         depth = _url_depth(url)
@@ -360,9 +378,12 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         for d, urls in sorted(digest_groups.items(),
                               key=lambda kv: (-len(kv[1]), kv[0]))
         if len(urls) >= 2]
+    # robots drift: archived URLs now blocked by the live robots.txt,
+    # sorted by URL (drift is computed per deduped URL, so already unique)
+    buckets["robots_drift"] = sorted(robots_drift, key=lambda r: r["url"])
     for k in buckets:
         if k not in ("param_names", "timeline", "subdomains", "statuses",
-                     "depths", "stale", "digest_clusters"):
+                     "depths", "stale", "digest_clusters", "robots_drift"):
             buckets[k].sort()
     return buckets
 
@@ -387,6 +408,88 @@ def oldest_captures(timeline, n=10):
              if v.get("last_seen")]
     dated.sort(key=lambda pair: pair[1])
     return dated[:n]
+
+
+def _robots_pattern_regex(pattern):
+    """Compile one robots.txt Disallow/Allow pattern to a regex.
+
+    `*` matches any sequence, a trailing `$` anchors the end of the path;
+    otherwise the pattern is a prefix match (the robots.txt rule). The
+    path tested includes the query string, per the robots spec.
+    """
+    anchored = pattern.endswith("$")
+    body = pattern[:-1] if anchored else pattern
+    out = []
+    for ch in body:
+        out.append(".*" if ch == "*" else re.escape(ch))
+    suffix = r"\Z" if anchored else ""
+    return re.compile("^" + "".join(out) + suffix)
+
+
+def robots_path_match(path, pattern):
+    """True if a robots.txt pattern matches this path (path + query)."""
+    return _robots_pattern_regex(pattern).match(path) is not None
+
+
+def parse_robots(text):
+    """Parse robots.txt into (disallows, allows) from `User-agent: *` groups.
+
+    Only wildcard groups apply to every crawler, so agent-specific groups
+    are ignored. Comments are stripped, keys are case-insensitive, and an
+    empty Disallow (allow-all) contributes nothing. Returns two lists of
+    raw patterns, in file order.
+    """
+    disallows, allows = [], []
+    agents, seen_rule = [], False
+    for raw_line in text.splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        key, value = key.strip().lower(), value.strip()
+        if key == "user-agent":
+            if seen_rule:
+                agents, seen_rule = [], False
+            agents.append(value.lower())
+        elif key in ("disallow", "allow"):
+            seen_rule = True
+            if "*" in agents and value:
+                (disallows if key == "disallow" else allows).append(value)
+    return disallows, allows
+
+
+def robots_disallowed(path, disallows, allows):
+    """Longest-match robots decision for a path: (disallowed, pattern).
+
+    The longest matching pattern wins; on a tie Allow wins (RFC 9309).
+    Returns (False, None) when no Disallow pattern matches the path.
+    """
+    best_dis = max((len(p) for p in disallows
+                    if robots_path_match(path, p)), default=None)
+    if best_dis is None:
+        return False, None
+    best_allow = max((len(p) for p in allows
+                      if robots_path_match(path, p)), default=-1)
+    if best_allow >= best_dis:
+        return False, None
+    pattern = next(p for p in disallows
+                   if len(p) == best_dis and robots_path_match(path, p))
+    return True, pattern
+
+
+def fetch_robots_disallow(domain, timeout=30):
+    """Fetch a domain's public robots.txt and return (disallows, allows).
+
+    This is the one request WaybackMiner makes to the target host itself
+    (everything else goes to web.archive.org); callers treat it as
+    opt-in. Raises on network/HTTP failure so the caller can warn and
+    continue without drift data.
+    """
+    url = f"https://{domain}/robots.txt"
+    req = urllib.request.Request(url, headers={"User-Agent": "WaybackMiner/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        text = resp.read().decode("utf-8", "replace")
+    return parse_robots(text)
 
 
 def render_json(buckets):
@@ -467,6 +570,13 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
                 print(f"           {u}")
             if len(cluster["urls"]) > 5:
                 print(f"           ... and {len(cluster['urls']) - 5} more")
+    if buckets["robots_drift"]:
+        print("\n[!] Now disallowed by robots.txt "
+              f"(archived but blocked today, first 20):")
+        for row in buckets["robots_drift"][:20]:
+            print(f"  {row['pattern']}  {row['url']}")
+        if len(buckets["robots_drift"]) > 20:
+            print(f"  ... and {len(buckets['robots_drift']) - 20} more")
 
 
 def main(argv=None):
@@ -544,6 +654,15 @@ def main(argv=None):
                     help="override the built-in interesting-file extension set, "
                          "e.g. '--interesting-exts env,key,pem' for a "
                          "secrets-focused run")
+    ap.add_argument("--robots-drift", dest="robots_drift",
+                    action="store_true",
+                    help="compare archived paths against the domain's live "
+                         "robots.txt and report archived URLs that are now "
+                         "Disallow-blocked; this is the one request made to "
+                         "the target host itself (its public robots.txt) — "
+                         "everything else still goes only to web.archive.org; "
+                         "a robots.txt fetch failure warns and continues "
+                         "without drift data")
     args = ap.parse_args(argv)
 
     if (args.since is not None and args.until is not None
@@ -563,10 +682,18 @@ def main(argv=None):
         print("no archived URLs found for this domain.")
         return 0
 
+    disallows, allows = [], []
+    if args.robots_drift:
+        try:
+            disallows, allows = fetch_robots_disallow(args.domain)
+        except Exception as exc:  # noqa: BLE001 - drift is auxiliary
+            print(f"warning: could not fetch robots.txt: {exc}; "
+                  f"continuing without robots drift", file=sys.stderr)
     buckets = analyze(entries, include_exts=args.ext,
                       exclude_exts=args.no_ext,
                       interesting_exts=args.interesting_exts,
-                      exclude_hosts=args.exclude_host)
+                      exclude_hosts=args.exclude_host,
+                      robots_disallow=disallows, robots_allow=allows)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
                  subdomains_only=args.subdomains_only)

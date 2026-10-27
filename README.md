@@ -17,6 +17,7 @@ touches the target itself.
 - **URLs with query parameters** — injection surface
 - **Interesting files** — `.php`, `.bak`, `.sql`, `.env`, `.json`, `.git`, …
 - **Duplicate content clusters** — URLs that served the identical response body (same CDX digest), i.e. the same page at many paths
+- **robots.txt drift** (opt-in `--robots-drift`) — archived URLs that the domain's current robots.txt now blocks
 
 ## Install
 
@@ -46,6 +47,7 @@ python3 waybackminer.py example.com --collapse digest    # one row per unique re
 python3 waybackminer.py example.com --since 2020 --until 2024  # mine the 2020-2024 era only
 python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  # per-bucket files for pipelines
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
+python3 waybackminer.py example.com --robots-drift  # archived URLs now blocked by robots.txt
 ```
 
 ## Sample run

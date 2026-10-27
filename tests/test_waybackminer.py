@@ -140,7 +140,7 @@ class TestCli(unittest.TestCase):
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
                                      "statuses", "depths", "stale",
-                                     "digest_clusters"})
+                                     "digest_clusters", "robots_drift"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -1027,3 +1027,99 @@ class TestDigestClusters(unittest.TestCase):
             wm.fetch_cdx("example.com")
             req = m.call_args[0][0]
             self.assertIn("digest", req.full_url)
+
+
+class TestRobotsDrift(unittest.TestCase):
+    ROBOTS = """
+        # a comment
+        User-agent: *
+        Disallow: /private/
+        Disallow: /tmp/*.bak$
+        Allow: /private/public/
+        User-agent: googlebot
+        Disallow: /google-only/
+        """
+
+    def test_parse_keeps_only_wildcard_group(self):
+        dis, allow = wm.parse_robots(self.ROBOTS)
+        self.assertEqual(dis, ["/private/", "/tmp/*.bak$"])
+        self.assertEqual(allow, ["/private/public/"])
+
+    def test_parse_ignores_empty_disallow_and_case(self):
+        dis, allow = wm.parse_robots("USER-AGENT: *\nDISALLOW:\n"
+                                     "Disallow: /x/\n")
+        self.assertEqual(dis, ["/x/"])
+        self.assertEqual(allow, [])
+
+    def test_matcher_prefix_wildcard_and_anchor(self):
+        self.assertTrue(wm.robots_path_match("/private/secret", "/private/"))
+        self.assertFalse(wm.robots_path_match("/private", "/private/"))
+        self.assertTrue(wm.robots_path_match("/tmp/a.bak", "/tmp/*.bak$"))
+        self.assertFalse(wm.robots_path_match("/tmp/a.bak.txt",
+                                              "/tmp/*.bak$"))
+        self.assertTrue(wm.robots_path_match("/search?q=x",
+                                             "/search?q=x"))
+
+    def test_longest_match_wins_and_allow_wins_ties(self):
+        blocked, pattern = wm.robots_disallowed(
+            "/private/public/page", ["/private/"], ["/private/public/"])
+        self.assertFalse(blocked)  # longer Allow overrides
+        blocked, pattern = wm.robots_disallowed(
+            "/private/secret", ["/private/"], ["/private/"])
+        self.assertFalse(blocked)  # tie goes to Allow
+        blocked, pattern = wm.robots_disallowed(
+            "/private/secret", ["/private/"], [])
+        self.assertTrue(blocked)
+        self.assertEqual(pattern, "/private/")
+
+    def test_analyze_drift_bucket(self):
+        entries = [
+            {"original": "http://example.com/private/secret"},
+            {"original": "http://example.com/private/public/page"},
+            {"original": "http://example.com/public"},
+            {"original": "http://example.com/tmp/a.bak"},
+        ]
+        buckets = wm.analyze(entries,
+                             robots_disallow=["/private/", "/tmp/*.bak$"],
+                             robots_allow=["/private/public/"])
+        self.assertEqual(buckets["robots_drift"], [
+            {"url": "http://example.com/private/secret",
+             "pattern": "/private/"},
+            {"url": "http://example.com/tmp/a.bak",
+             "pattern": "/tmp/*.bak$"}])
+
+    def test_no_patterns_means_no_drift(self):
+        buckets = wm.analyze([{"original": "http://example.com/a"}])
+        self.assertEqual(buckets["robots_drift"], [])
+
+    def test_summary_shows_drift_section(self):
+        buckets = wm.analyze(
+            [{"original": "http://example.com/private/secret"}],
+            robots_disallow=["/private/"])
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        self.assertIn("Now disallowed by robots.txt", buf.getvalue())
+        self.assertIn("/private/secret", buf.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        with mock.patch("waybackminer.fetch_robots_disallow",
+                        return_value=(["/private/"], [])):
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--robots-drift"])
+        self.assertEqual(rc, 0)
+        # SAMPLE rows carry no /private/ path, so only the section
+        # absence is asserted here; the analyze test covers the rows
+        self.assertNotIn("Now disallowed", buf.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_robots_failure_warns_and_continues(self, _):
+        with mock.patch("waybackminer.fetch_robots_disallow",
+                        side_effect=RuntimeError("boom")):
+            buf, err = io.StringIO(), io.StringIO()
+            with mock.patch("sys.stdout", buf), mock.patch("sys.stderr", err):
+                rc = wm.main(["example.com", "--robots-drift"])
+        self.assertEqual(rc, 0)
+        self.assertIn("could not fetch robots.txt", err.getvalue())

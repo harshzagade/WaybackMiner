@@ -4,6 +4,13 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--robots-drift` flag: compare archived paths against the domain's live
+  robots.txt and report archived URLs that are now Disallow-blocked (the
+  `robots_drift` bucket: url/pattern records, also in `--json`; longest
+  matching rule wins, Allow wins ties). This is the one request made to
+  the target host itself (its public robots.txt); a fetch failure warns
+  and continues without drift data. Everything else still goes only to
+  web.archive.org.
 - Digest dedupe cluster report: the CDX `digest` field is now fetched and
   URLs sharing one digest (the same response body served at many paths)
   are grouped in the `digest_clusters` bucket (digest/count/urls, largest
