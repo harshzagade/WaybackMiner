@@ -269,6 +269,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     URLs at that depth (depth 0 = the bare host), ascending, so deep
     directory trees stand out.
 
+    The `years` bucket maps each first-capture year to the count of deduped
+    URLs first seen in that year (from the timeline's `first_seen`, so a
+    URL re-captured later still counts under its earliest year), ascending,
+    so the years the archived surface grew stand out. URLs with no known
+    capture timestamp are skipped — a year is a date claim, not a
+    data-absence claim.
+
     The `stale` bucket lists the URLs whose `last_seen` is the oldest (top
     10, as url/last_seen records) — the pages most likely abandoned.
 
@@ -367,6 +374,16 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     # path-depth rollup: depth -> count of archived (deduped) URLs,
     # sorted by depth ascending (depth 0 = the bare host)
     buckets["depths"] = {d: depth_counts[d] for d in sorted(depth_counts)}
+    # first-seen year rollup: year -> count of deduped URLs first captured
+    # in that year, sorted by year ascending; derived from the timeline so
+    # a re-captured URL still counts under its earliest year, and URLs
+    # with no known timestamp are skipped
+    year_counts = {}
+    for ts in first_seen.values():
+        if ts and len(ts) >= 4 and ts[:4].isdigit():
+            year = ts[:4]
+            year_counts[year] = year_counts.get(year, 0) + 1
+    buckets["years"] = {y: year_counts[y] for y in sorted(year_counts)}
     # stale captures: the URLs whose last capture is the oldest (top 10),
     # i.e. the pages most likely abandoned — carried as url/last_seen records
     buckets["stale"] = [{"url": u, "last_seen": ts}
@@ -383,7 +400,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["robots_drift"] = sorted(robots_drift, key=lambda r: r["url"])
     for k in buckets:
         if k not in ("param_names", "timeline", "subdomains", "statuses",
-                     "depths", "stale", "digest_clusters", "robots_drift"):
+                     "depths", "years", "stale", "digest_clusters",
+                     "robots_drift"):
             buckets[k].sort()
     return buckets
 
@@ -562,6 +580,10 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
             print(f"\n[#] Deepest URLs (depth {deepest}, first {len(shown)}):")
             for u in shown:
                 print(f"  {u}")
+    if buckets["years"]:
+        print("\n[=] First-seen years (deduped URLs per first-capture year):")
+        for year, count in buckets["years"].items():
+            print(f"  {count:>6}  {year}")
     if buckets["digest_clusters"]:
         print("\n[=] Duplicate content (same CDX digest, multiple URLs):")
         for cluster in buckets["digest_clusters"][:10]:

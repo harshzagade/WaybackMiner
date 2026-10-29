@@ -4,6 +4,11 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- First-seen year rollup: the text summary now shows a `First-seen years`
+  section (deduped-URL counts per year of first capture, derived from the
+  timeline so re-captured URLs count under their earliest year); the same
+  counts ship in the `--json` report as the `years` key. URLs with no known
+  capture timestamp are skipped.
 - `--robots-drift` flag: compare archived paths against the domain's live
   robots.txt and report archived URLs that are now Disallow-blocked (the
   `robots_drift` bucket: url/pattern records, also in `--json`; longest

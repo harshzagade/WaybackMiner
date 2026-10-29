@@ -94,6 +94,12 @@ The summary also rolls archived URLs up by path depth (a `[=] Path depths`
 section, plus the ten deepest URLs — a fast way to spot deep admin trees),
 and the `--json` report carries the same counts under the `depths` key.
 
+It also rolls them up by first-capture year (a `[=] First-seen years`
+section counting deduped URLs per year of first capture, so you can see
+when the archived surface grew); the `--json` report carries the same
+counts under the `years` key. URLs with no known capture timestamp are
+skipped from this rollup.
+
 With `--js-only`, the tool prints just the JS URL list (one per line) so you
 can pipe it straight into other tools. With `--params-only`, it prints the
 unique query-parameter names across the domain (sorted, one per line) — a

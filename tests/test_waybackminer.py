@@ -139,7 +139,7 @@ class TestCli(unittest.TestCase):
         data = json.loads(buf.getvalue())
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
-                                     "statuses", "depths", "stale",
+                                     "statuses", "depths", "years", "stale",
                                      "digest_clusters", "robots_drift"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
@@ -781,6 +781,52 @@ class TestUrlDepth(unittest.TestCase):
         buckets = wm.analyze(self._entries())
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["depths"], {"0": 1, "1": 1, "2": 1, "3": 1})
+
+
+class TestFirstSeenYears(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/old", "statuscode": "200",
+             "timestamp": "20190601000000"},
+            {"original": "http://example.com/mid", "statuscode": "200",
+             "timestamp": "20230101000000"},
+            {"original": "http://example.com/new", "statuscode": "200",
+             "timestamp": "20240105000000"},
+            {"original": "http://example.com/new", "statuscode": "200",
+             "timestamp": "20240201000000"},  # dup: still counts under 2024
+            {"original": "http://example.com/nodate", "statuscode": "200"},
+            {"original": "http://example.com/also-old", "statuscode": "200",
+             "timestamp": "20191231000000"},
+        ]
+
+    def test_years_bucket_counts_deduped_urls_by_first_seen_year(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["years"],
+                         {"2019": 2, "2023": 1, "2024": 1})
+
+    def test_earlier_duplicate_moves_url_to_earlier_year(self):
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20180101000000"},  # earlier dup advances first_seen
+        ]
+        self.assertEqual(wm.analyze(entries)["years"], {"2018": 1})
+
+    def test_summary_shows_year_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] First-seen years", out)
+        self.assertIn("2019", out)
+        self.assertIn("2024", out)
+
+    def test_json_includes_years(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["years"], {"2019": 2, "2023": 1, "2024": 1})
 
 
 class TestOldestCaptures(unittest.TestCase):
