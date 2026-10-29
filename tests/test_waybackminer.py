@@ -139,8 +139,9 @@ class TestCli(unittest.TestCase):
         data = json.loads(buf.getvalue())
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
-                                     "statuses", "depths", "years", "stale",
-                                     "digest_clusters", "robots_drift"})
+                                     "statuses", "depths", "years", "mimetypes",
+                                     "stale", "digest_clusters",
+                                     "robots_drift"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -827,6 +828,47 @@ class TestFirstSeenYears(unittest.TestCase):
         buckets = wm.analyze(self._entries())
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["years"], {"2019": 2, "2023": 1, "2024": 1})
+
+
+class TestMimetypeRollup(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "mimetype": "text/html"},
+            {"original": "http://example.com/b", "statuscode": "200",
+             "mimetype": "Text/HTML"},  # case-insensitive: same bucket
+            {"original": "http://example.com/c.js", "statuscode": "200",
+             "mimetype": "application/javascript"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "mimetype": "text/html"},  # dup URL: counted once
+            {"original": "http://example.com/d", "statuscode": "200"},
+            # no mimetype -> "?"
+        ]
+
+    def test_mimetypes_bucket_counts_deduped_urls(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["mimetypes"],
+                         {"text/html": 2, "application/javascript": 1,
+                          "?": 1})
+
+    def test_mimetypes_sorted_by_count_desc_then_name(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(list(buckets["mimetypes"]),
+                         ["text/html", "?", "application/javascript"])
+
+    def test_summary_shows_mimetype_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] Mimetypes", out)
+        self.assertIn("text/html", out)
+
+    def test_json_includes_mimetypes(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["mimetypes"]["text/html"], 2)
 
 
 class TestOldestCaptures(unittest.TestCase):

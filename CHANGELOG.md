@@ -4,6 +4,10 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Mimetype rollup: the text summary now shows a `Mimetypes` section
+  (deduped-URL counts per CDX mimetype, count desc then mimetype asc,
+  top 20; mimetypes lowercased, missing ones under `?`); the same counts
+  ship in the `--json` report as the `mimetypes` key.
 - First-seen year rollup: the text summary now shows a `First-seen years`
   section (deduped-URL counts per year of first capture, derived from the
   timeline so re-captured URLs count under their earliest year); the same

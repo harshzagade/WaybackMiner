@@ -276,6 +276,12 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     capture timestamp are skipped — a year is a date claim, not a
     data-absence claim.
 
+    The `mimetypes` bucket maps each CDX mimetype to the count of deduped
+    URLs captured with it (normalized to lowercase, entries with no
+    mimetype land under "?"), sorted by count desc then mimetype asc, so
+    the makeup of the archived surface (how much is HTML vs JS vs images)
+    is visible at a glance.
+
     The `stale` bucket lists the URLs whose `last_seen` is the oldest (top
     10, as url/last_seen records) — the pages most likely abandoned.
 
@@ -305,6 +311,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     rollup = {}
     status_counts = {}
     depth_counts = {}
+    mimetype_counts = {}
     digest_groups = {}
     robots_drift = []
     disallow_patterns = list(robots_disallow or ())
@@ -345,6 +352,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                 robots_drift.append({"url": url, "pattern": pattern})
         code = str(e.get("statuscode") or "?")
         status_counts[code] = status_counts.get(code, 0) + 1
+        mt = (e.get("mimetype") or "").strip().lower() or "?"
+        mimetype_counts[mt] = mimetype_counts.get(mt, 0) + 1
         depth = _url_depth(url)
         depth_counts[depth] = depth_counts.get(depth, 0) + 1
         host = urllib.parse.urlparse(url).hostname
@@ -384,6 +393,11 @@ def analyze(entries, include_exts=None, exclude_exts=None,
             year = ts[:4]
             year_counts[year] = year_counts.get(year, 0) + 1
     buckets["years"] = {y: year_counts[y] for y in sorted(year_counts)}
+    # mimetype rollup: mimetype -> count of deduped URLs, sorted by count
+    # desc then mimetype asc (same ordering as the subdomain rollup)
+    buckets["mimetypes"] = {m: mimetype_counts[m] for m in
+                            sorted(mimetype_counts,
+                                   key=lambda m: (-mimetype_counts[m], m))}
     # stale captures: the URLs whose last capture is the oldest (top 10),
     # i.e. the pages most likely abandoned — carried as url/last_seen records
     buckets["stale"] = [{"url": u, "last_seen": ts}
@@ -400,8 +414,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["robots_drift"] = sorted(robots_drift, key=lambda r: r["url"])
     for k in buckets:
         if k not in ("param_names", "timeline", "subdomains", "statuses",
-                     "depths", "years", "stale", "digest_clusters",
-                     "robots_drift"):
+                     "depths", "years", "mimetypes", "stale",
+                     "digest_clusters", "robots_drift"):
             buckets[k].sort()
     return buckets
 
@@ -584,6 +598,12 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         print("\n[=] First-seen years (deduped URLs per first-capture year):")
         for year, count in buckets["years"].items():
             print(f"  {count:>6}  {year}")
+    if buckets["mimetypes"]:
+        print("\n[=] Mimetypes (deduped URLs per CDX mimetype, top 20):")
+        for mt, count in list(buckets["mimetypes"].items())[:20]:
+            print(f"  {count:>6}  {mt}")
+        if len(buckets["mimetypes"]) > 20:
+            print(f"  ... and {len(buckets['mimetypes']) - 20} more")
     if buckets["digest_clusters"]:
         print("\n[=] Duplicate content (same CDX digest, multiple URLs):")
         for cluster in buckets["digest_clusters"][:10]:

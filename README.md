@@ -100,6 +100,11 @@ when the archived surface grew); the `--json` report carries the same
 counts under the `years` key. URLs with no known capture timestamp are
 skipped from this rollup.
 
+It also rolls them up by CDX mimetype (a `[=] Mimetypes` section with the
+top 20 types, count desc); the `--json` report carries the same counts
+under the `mimetypes` key. Mimetypes are lowercased, and entries with no
+mimetype land under `?`.
+
 With `--js-only`, the tool prints just the JS URL list (one per line) so you
 can pipe it straight into other tools. With `--params-only`, it prints the
 unique query-parameter names across the domain (sorted, one per line) — a
