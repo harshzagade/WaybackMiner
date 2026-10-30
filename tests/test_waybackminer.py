@@ -141,7 +141,7 @@ class TestCli(unittest.TestCase):
                                      "interesting", "timeline", "subdomains",
                                      "statuses", "depths", "years", "mimetypes",
                                      "stale", "digest_clusters",
-                                     "robots_drift"})
+                                     "robots_drift", "url_status"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -228,6 +228,159 @@ class TestCli(unittest.TestCase):
         out = buf.getvalue()
         self.assertIn("Archived URLs : 5", out)  # all rows incl. the 404 one
         self.assertIn("JS files      : 1", out)
+
+
+class TestCsv(unittest.TestCase):
+    """Tests for the --csv output mode and render_csv() helper."""
+
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "mimetype": "text/html", "timestamp": "20240101000000"},
+            {"original": "http://example.com/b", "statuscode": "301",
+             "mimetype": "text/html", "timestamp": "20240201000000"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "mimetype": "text/html", "timestamp": "20240301000000"},  # dup
+        ]
+
+    def test_header_row(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        wm.render_csv(buckets, file=buf)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(lines[0], "url,first_seen,last_seen,statuscode,depth")
+
+    def test_rows_for_sample_entries(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        wm.render_csv(buckets, file=buf)
+        lines = buf.getvalue().splitlines()
+        # two deduped URLs: /a and /b (sorted)
+        self.assertEqual(len(lines), 3)  # header + 2 data rows
+        self.assertEqual(lines[1],
+                         "http://example.com/a,20240101000000,20240301000000,200,1")
+        self.assertEqual(lines[2],
+                         "http://example.com/b,20240201000000,20240201000000,301,1")
+
+    def test_unknown_timestamp_is_empty_string(self):
+        entries = [
+            {"original": "http://example.com/nodate", "statuscode": "200",
+             "mimetype": "text/html"},  # no timestamp key
+        ]
+        buckets = wm.analyze(entries)
+        buf = io.StringIO()
+        wm.render_csv(buckets, file=buf)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(lines[1], "http://example.com/nodate,,,200,1")
+
+    def test_missing_statuscode_is_question_mark(self):
+        entries = [
+            {"original": "http://example.com/nostatus", "mimetype": "text/html",
+             "timestamp": "20240101000000"},  # no statuscode key
+        ]
+        buckets = wm.analyze(entries)
+        buf = io.StringIO()
+        wm.render_csv(buckets, file=buf)
+        lines = buf.getvalue().splitlines()
+        self.assertIn(",?,", lines[1])
+
+    def test_csv_quoting_for_url_containing_comma(self):
+        # Synthesise a bucket with a URL that contains a comma (unusual but
+        # parseable via the csv module's quoting rules)
+        entries = [
+            {"original": "http://example.com/path,with,commas", "statuscode": "200",
+             "mimetype": "text/html", "timestamp": "20240101000000"},
+        ]
+        buckets = wm.analyze(entries)
+        buf = io.StringIO()
+        wm.render_csv(buckets, file=buf)
+        lines = buf.getvalue().splitlines()
+        # The URL field must be quoted because it contains commas
+        self.assertTrue(lines[1].startswith('"http://example.com/path,with,commas"'))
+
+    def test_depth_values_in_csv(self):
+        entries = [
+            {"original": "http://example.com/", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/a/b/c", "statuscode": "200",
+             "timestamp": "20240101000000"},
+        ]
+        buckets = wm.analyze(entries)
+        buf = io.StringIO()
+        wm.render_csv(buckets, file=buf)
+        lines = buf.getvalue().splitlines()
+        # host-only URL: depth 0
+        root_row = next(l for l in lines[1:] if "/a/b/c" not in l)
+        self.assertTrue(root_row.endswith(",0"))
+        # /a/b/c: depth 3
+        deep_row = next(l for l in lines[1:] if "/a/b/c" in l)
+        self.assertTrue(deep_row.endswith(",3"))
+
+    def test_url_status_bucket_in_analyze(self):
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200"},
+            {"original": "http://example.com/b"},  # missing statuscode -> "?"
+        ]
+        buckets = wm.analyze(entries)
+        self.assertIn("url_status", buckets)
+        self.assertEqual(buckets["url_status"]["http://example.com/a"], "200")
+        self.assertEqual(buckets["url_status"]["http://example.com/b"], "?")
+
+    def test_url_status_not_sorted_as_list(self):
+        """url_status must not be sorted as a list (it's a dict; sort loop
+        must exclude it)."""
+        entries = [
+            {"original": "http://example.com/z", "statuscode": "301"},
+            {"original": "http://example.com/a", "statuscode": "200"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertIsInstance(buckets["url_status"], dict)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_csv_cli_flag_outputs_csv(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--csv"])
+        self.assertEqual(rc, 0)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(lines[0], "url,first_seen,last_seen,statuscode,depth")
+        # There should be one data row per deduped URL from SAMPLE_CDX (5 rows)
+        self.assertEqual(len(lines), 6)  # header + 5 data rows
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_csv_conflicts_with_json(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--csv", "--json"])
+        self.assertEqual(cm.exception.code, 2)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_csv_conflicts_with_js_only(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--csv", "--js-only"])
+        self.assertEqual(cm.exception.code, 2)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_csv_output_flag_writes_csv_file(self, _):
+        with mock.patch("builtins.open", mock.mock_open()) as m:
+            rc = wm.main(["example.com", "--csv", "-o", "out.csv"])
+        self.assertEqual(rc, 0)
+        written = "".join(c.args[0] for c in
+                          m.return_value.write.call_args_list)
+        self.assertIn("url,first_seen,last_seen,statuscode,depth", written)
+
+    def test_json_includes_url_status_bucket(self):
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+        ]
+        buckets = wm.analyze(entries)
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertIn("url_status", parsed)
+        self.assertEqual(parsed["url_status"]["http://example.com/a"], "200")
 
 
 class TestIncludeStatus(unittest.TestCase):

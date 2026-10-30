@@ -48,6 +48,8 @@ python3 waybackminer.py example.com --since 2020 --until 2024  # mine the 2020-2
 python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  # per-bucket files for pipelines
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 python3 waybackminer.py example.com --robots-drift  # archived URLs now blocked by robots.txt
+python3 waybackminer.py example.com --csv           # CSV: url,first_seen,last_seen,statuscode,depth
+python3 waybackminer.py example.com --csv -o out.csv  # write CSV to file
 ```
 
 ## Sample run
@@ -114,6 +116,12 @@ ready seed list for wordlist builders like ParamMiner. With
 With `--subdomains-only`, it prints per-subdomain archived-URL counts
 (`host: count`, sorted by count) — a quick read of where the archived
 surface actually lives.
+
+With `--csv`, the tool prints a CSV report to stdout (header:
+`url,first_seen,last_seen,statuscode,depth`, one row per deduped archived URL
+in sorted order). Combined with `--output`, the CSV is written to the file
+instead of stdout. The `csv` module handles quoting, so URLs containing commas
+are correctly escaped.
 
 ```console
 $ python3 waybackminer.py target.example --params-only

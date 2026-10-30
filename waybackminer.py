@@ -11,6 +11,7 @@ Stdlib only. Passive recon - makes requests only to web.archive.org,
 never touches the target itself.
 """
 import argparse
+import csv
 import json
 import re
 import sys
@@ -310,6 +311,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets = {"all": [], "js": [], "params": [], "param_names": [], "interesting": []}
     rollup = {}
     status_counts = {}
+    url_status = {}
     depth_counts = {}
     mimetype_counts = {}
     digest_groups = {}
@@ -340,6 +342,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         seen.add(url)
         buckets["all"].append(url)
         first_seen[url] = last_seen[url] = ts
+        code = str(e.get("statuscode") or "?")
+        url_status[url] = code
         digest = e.get("digest") or None
         if digest:
             digest_groups.setdefault(digest, []).append(url)
@@ -350,7 +354,6 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                                                  allow_patterns)
             if blocked:
                 robots_drift.append({"url": url, "pattern": pattern})
-        code = str(e.get("statuscode") or "?")
         status_counts[code] = status_counts.get(code, 0) + 1
         mt = (e.get("mimetype") or "").strip().lower() or "?"
         mimetype_counts[mt] = mimetype_counts.get(mt, 0) + 1
@@ -371,6 +374,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["param_names"] = sorted(param_names)
     buckets["timeline"] = {u: {"first_seen": first_seen[u], "last_seen": last_seen[u]}
                            for u in sorted(first_seen)}
+    # per-URL status code: url -> statuscode string ('?' when missing),
+    # ordered by URL (same ordering as timeline) for deterministic JSON output
+    buckets["url_status"] = {u: url_status[u] for u in sorted(url_status)}
     # subdomain rollup: host -> count of archived (deduped) URLs,
     # sorted by count desc then hostname asc
     buckets["subdomains"] = {h: rollup[h] for h in
@@ -413,8 +419,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     # sorted by URL (drift is computed per deduped URL, so already unique)
     buckets["robots_drift"] = sorted(robots_drift, key=lambda r: r["url"])
     for k in buckets:
-        if k not in ("param_names", "timeline", "subdomains", "statuses",
-                     "depths", "years", "mimetypes", "stale",
+        if k not in ("param_names", "timeline", "url_status", "subdomains",
+                     "statuses", "depths", "years", "mimetypes", "stale",
                      "digest_clusters", "robots_drift"):
             buckets[k].sort()
     return buckets
@@ -529,10 +535,38 @@ def render_json(buckets):
     return json.dumps(buckets, indent=2)
 
 
+def render_csv(buckets, file=None):
+    """Write a CSV report to *file* (default: sys.stdout).
+
+    Header: url,first_seen,last_seen,statuscode,depth
+    One row per deduped archived URL, in buckets['all'] order (sorted).
+    first_seen/last_seen come from buckets['timeline'] (empty string when
+    unknown). statuscode comes from buckets['url_status']. depth is
+    computed via _url_depth(). Uses Python's csv module so commas/quotes
+    in any field are handled correctly.
+    """
+    if file is None:
+        file = sys.stdout
+    writer = csv.writer(file, lineterminator="\n")
+    writer.writerow(["url", "first_seen", "last_seen", "statuscode", "depth"])
+    timeline = buckets.get("timeline", {})
+    url_status = buckets.get("url_status", {})
+    for url in buckets["all"]:
+        tl = timeline.get(url, {})
+        first = tl.get("first_seen") or ""
+        last = tl.get("last_seen") or ""
+        code = url_status.get(url, "?")
+        depth = _url_depth(url)
+        writer.writerow([url, first, last, code, depth])
+
+
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
-               json_only=False, subdomains_only=False):
+               json_only=False, subdomains_only=False, csv_only=False):
     if json_only:
         print(render_json(buckets))
+        return
+    if csv_only:
+        render_csv(buckets)
         return
     if js_only:
         for u in buckets["js"]:
@@ -665,6 +699,12 @@ def main(argv=None):
     modes.add_argument("--subdomains-only", action="store_true",
                        help="print per-subdomain archived-URL counts "
                             "(sorted by count, one per line)")
+    modes.add_argument("--csv", action="store_true",
+                       help="print a CSV report to stdout with header "
+                            "'url,first_seen,last_seen,statuscode,depth' "
+                            "and one row per deduped archived URL (sorted); "
+                            "combined with --output the CSV is written to "
+                            "the file instead")
     ap.add_argument("--output", "-o", help="write full URL list to file")
     ap.add_argument("--dump-js", dest="dump_js", metavar="FILE",
                     help="write the JavaScript-file URLs bucket to FILE, one "
@@ -738,7 +778,7 @@ def main(argv=None):
                       robots_disallow=disallows, robots_allow=allows)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
-                 subdomains_only=args.subdomains_only)
+                 subdomains_only=args.subdomains_only, csv_only=args.csv)
     for path, items in ((args.dump_js, buckets["js"]),
                         (args.dump_params, buckets["params"])):
         if path is None:
@@ -753,6 +793,8 @@ def main(argv=None):
         with open(args.output, "w", encoding="utf-8") as fh:
             if args.json:
                 fh.write(render_json(buckets) + "\n")
+            elif args.csv:
+                render_csv(buckets, file=fh)
             else:
                 fh.write("\n".join(buckets["all"]) + "\n")
         print(f"\nwrote {len(buckets['all'])} URLs to {args.output}")

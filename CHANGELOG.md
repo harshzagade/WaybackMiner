@@ -4,6 +4,13 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--csv` output mode: prints a CSV report to stdout with header
+  `url,first_seen,last_seen,statuscode,depth` and one row per deduped
+  archived URL (in sorted order); combined with `--output`, the CSV is
+  written to the file instead of stdout. Python's `csv` module handles
+  quoting, so URLs containing commas are correctly escaped. The per-URL
+  status code is tracked in a new `url_status` bucket (url → statuscode
+  string, `?` when missing), also included in the `--json` report.
 - Mimetype rollup: the text summary now shows a `Mimetypes` section
   (deduped-URL counts per CDX mimetype, count desc then mimetype asc,
   top 20; mimetypes lowercased, missing ones under `?`); the same counts
