@@ -168,6 +168,28 @@ def parse_exclude_host(value):
     return host
 
 
+def parse_exclude_path(value):
+    """Parse '--exclude-path /admin/' into a path prefix to drop.
+
+    Paths are case-sensitive, so the value is returned exactly as given
+    (no lowercasing, no trailing-slash stripping). Raises
+    argparse.ArgumentTypeError on bad input so argparse exits 2 with a
+    usage error (fail fast, like the other CLI validations).
+    """
+    prefix = value.strip()
+    if not prefix:
+        raise argparse.ArgumentTypeError(
+            "invalid path prefix: expected e.g. '/admin/'")
+    if any(c.isspace() for c in prefix):
+        raise argparse.ArgumentTypeError(
+            f"invalid path prefix {value!r}: must not contain whitespace")
+    if not prefix.startswith("/"):
+        raise argparse.ArgumentTypeError(
+            f"invalid path prefix {value!r}: expected a path starting "
+            "with '/', e.g. '/admin/'")
+    return prefix
+
+
 def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
                mimetypes=None, collapse="urlkey", since=None, until=None):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
@@ -245,6 +267,7 @@ def _url_depth(url):
 
 def analyze(entries, include_exts=None, exclude_exts=None,
             interesting_exts=None, exclude_hosts=None,
+            exclude_paths=None,
             robots_disallow=None, robots_allow=None):
     """Split entries into js / params / param_names / interesting / all buckets
     (deduped, sorted), plus a first_seen/last_seen timeline per URL from the
@@ -258,8 +281,10 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     interesting-files bucket. exclude_hosts: drop entries whose hostname
     (exact match, case-insensitive, ports ignored) is in this set, before
     bucketing, so every mode, the subdomain rollup, and --json stay
-    consistent. All default to None, meaning no filtering and the
-    built-in interesting set.
+    consistent. exclude_paths: drop entries whose URL path starts with
+    any of these prefixes (literal prefix match, case-sensitive, query
+    strings ignored), also before bucketing. All default to None, meaning
+    no filtering and the built-in interesting set.
 
     The `statuses` bucket maps each HTTP status code to the count of deduped
     URLs captured with it (entries with no statuscode field land under "?"),
@@ -303,6 +328,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
     exc_hosts = {h.lower().rstrip(".") for h in (exclude_hosts or ())}
+    exc_paths = list(exclude_paths or ())
     interesting = (set(interesting_exts) if interesting_exts is not None
                    else INTERESTING_EXTS)
     seen = set()
@@ -324,6 +350,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
             continue
         entry_host = urllib.parse.urlparse(url).hostname
         if (entry_host and entry_host.lower().rstrip(".") in exc_hosts):
+            continue
+        entry_path = urllib.parse.urlparse(url).path
+        if any(entry_path.startswith(p) for p in exc_paths):
             continue
         ext = _ext(url)
         if inc and ext not in inc:
@@ -731,6 +760,14 @@ def main(argv=None):
                          "match, case-insensitive, ports ignored; sibling "
                          "subdomains are kept); applied before bucketing so "
                          "all modes and --json stay consistent")
+    ap.add_argument("--exclude-path", dest="exclude_path",
+                    action="append", type=parse_exclude_path,
+                    default=None, metavar="PREFIX",
+                    help="repeatable: drop archived URLs whose path starts "
+                         "with this prefix, e.g. '--exclude-path /admin/' "
+                         "(literal prefix match, case-sensitive, query "
+                         "strings ignored); applied before bucketing so "
+                         "all modes and --json/--csv stay consistent")
     ap.add_argument("--interesting-exts", dest="interesting_exts",
                     type=parse_extensions, default=None, metavar="EXTS",
                     help="override the built-in interesting-file extension set, "
@@ -775,6 +812,7 @@ def main(argv=None):
                       exclude_exts=args.no_ext,
                       interesting_exts=args.interesting_exts,
                       exclude_hosts=args.exclude_host,
+                      exclude_paths=args.exclude_path,
                       robots_disallow=disallows, robots_allow=allows)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,

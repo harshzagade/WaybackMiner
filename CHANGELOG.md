@@ -4,6 +4,13 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--exclude-path` repeatable flag: drop archived URLs whose path starts
+  with a given prefix (e.g. `--exclude-path /admin/`), client-side and
+  before bucketing so all output modes, rollups, and `--json`/`--csv`
+  stay consistent. The match is a literal, case-sensitive path prefix
+  (so `/admin` also matches `/administrator`); query strings are
+  ignored for matching. Malformed prefixes (empty, whitespace, or not
+  starting with `/`) fail fast with argparse exit 2.
 - `--csv` output mode: prints a CSV report to stdout with header
   `url,first_seen,last_seen,statuscode,depth` and one row per deduped
   archived URL (in sorted order); combined with `--output`, the CSV is

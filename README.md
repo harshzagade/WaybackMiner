@@ -47,6 +47,7 @@ python3 waybackminer.py example.com --collapse digest    # one row per unique re
 python3 waybackminer.py example.com --since 2020 --until 2024  # mine the 2020-2024 era only
 python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  # per-bucket files for pipelines
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
+python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
 python3 waybackminer.py example.com --robots-drift  # archived URLs now blocked by robots.txt
 python3 waybackminer.py example.com --csv           # CSV: url,first_seen,last_seen,statuscode,depth
 python3 waybackminer.py example.com --csv -o out.csv  # write CSV to file

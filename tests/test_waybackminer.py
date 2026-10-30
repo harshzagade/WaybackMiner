@@ -1364,3 +1364,78 @@ class TestRobotsDrift(unittest.TestCase):
                 rc = wm.main(["example.com", "--robots-drift"])
         self.assertEqual(rc, 0)
         self.assertIn("could not fetch robots.txt", err.getvalue())
+
+
+class TestExcludePath(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/admin/dashboard",
+             "statuscode": "200"},
+            {"original": "http://example.com/administrator",
+             "statuscode": "200"},
+            {"original": "http://example.com/admin/?x=1",
+             "statuscode": "200"},
+            {"original": "http://example.com/Admin/page",
+             "statuscode": "200"},
+            {"original": "http://example.com/public/page",
+             "statuscode": "200"},
+            {"original": "http://example.com/", "statuscode": "200"},
+        ]
+
+    def test_drops_prefixed_paths(self):
+        buckets = wm.analyze(self._entries(), exclude_paths=["/admin/"])
+        self.assertEqual(buckets["all"], [
+            "http://example.com/",
+            "http://example.com/Admin/page",
+            "http://example.com/administrator",
+            "http://example.com/public/page"])
+
+    def test_prefix_match_is_literal(self):
+        # '/admin' is a literal prefix, so it also matches '/administrator'
+        buckets = wm.analyze(self._entries(), exclude_paths=["/admin"])
+        self.assertNotIn("http://example.com/administrator",
+                         buckets["all"])
+        self.assertNotIn("http://example.com/admin/dashboard",
+                         buckets["all"])
+
+    def test_query_string_ignored_for_matching(self):
+        buckets = wm.analyze(self._entries(), exclude_paths=["/admin/"])
+        self.assertNotIn("http://example.com/admin/?x=1", buckets["all"])
+
+    def test_match_is_case_sensitive(self):
+        buckets = wm.analyze(self._entries(), exclude_paths=["/admin/"])
+        self.assertIn("http://example.com/Admin/page", buckets["all"])
+
+    def test_multiple_prefixes_union(self):
+        buckets = wm.analyze(self._entries(),
+                             exclude_paths=["/admin/", "/public/"])
+        self.assertEqual(buckets["all"], [
+            "http://example.com/",
+            "http://example.com/Admin/page",
+            "http://example.com/administrator"])
+
+    def test_none_changes_nothing(self):
+        buckets = wm.analyze(self._entries(), exclude_paths=None)
+        self.assertEqual(len(buckets["all"]), 6)
+
+    def test_parse_accepts_path_prefix_unchanged(self):
+        self.assertEqual(wm.parse_exclude_path("/admin/"), "/admin/")
+
+    def test_parse_rejects_garbage(self):
+        for bad in ("", "   ", "admin", "admin/", "/ad min/"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                wm.parse_exclude_path(bad)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--exclude-path", "/app.js",
+                          "--js-only"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(), "")
+
+    def test_cli_invalid_prefix_exits_2(self):
+        with self.assertRaises(SystemExit) as cm:
+            wm.main(["example.com", "--exclude-path", "admin"])
+        self.assertEqual(cm.exception.code, 2)
