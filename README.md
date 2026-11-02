@@ -48,6 +48,7 @@ python3 waybackminer.py example.com --since 2020 --until 2024  # mine the 2020-2
 python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  # per-bucket files for pipelines
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
+python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only depth 2-3 URLs
 python3 waybackminer.py example.com --robots-drift  # archived URLs now blocked by robots.txt
 python3 waybackminer.py example.com --csv           # CSV: url,first_seen,last_seen,statuscode,depth
 python3 waybackminer.py example.com --csv -o out.csv  # write CSV to file
@@ -96,6 +97,12 @@ the `--json` report under the `statuses` key.
 The summary also rolls archived URLs up by path depth (a `[=] Path depths`
 section, plus the ten deepest URLs — a fast way to spot deep admin trees),
 and the `--json` report carries the same counts under the `depths` key.
+`--min-depth N` / `--max-depth N` keep only URLs within a path-depth range
+(depth 0 = the bare host, trailing slashes ignored), applied before
+bucketing so every mode, rollup, and `--json`/`--csv` stays consistent —
+use them to focus on the shallow surface or on deep admin trees. A
+`--min-depth` greater than `--max-depth`, or a negative depth, fails fast
+with exit 2.
 
 It also rolls them up by first-capture year (a `[=] First-seen years`
 section counting deduped URLs per year of first capture, so you can see

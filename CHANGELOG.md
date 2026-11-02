@@ -4,6 +4,11 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--min-depth` / `--max-depth` bounds: keep only archived URLs whose
+  path depth (depth 0 = the bare host, trailing slashes ignored) falls
+  within the range, applied before bucketing so all output modes,
+  rollups, and `--json`/`--csv` stay consistent. A min greater than max,
+  or a negative depth, fails fast with argparse exit 2.
 - `--exclude-path` repeatable flag: drop archived URLs whose path starts
   with a given prefix (e.g. `--exclude-path /admin/`), client-side and
   before bucketing so all output modes, rollups, and `--json`/`--csv`

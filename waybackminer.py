@@ -190,6 +190,19 @@ def parse_exclude_path(value):
     return prefix
 
 
+def parse_depth_bound(value):
+    """Parse '--min-depth/--max-depth 2' into a non-negative int depth.
+
+    Raises argparse.ArgumentTypeError on bad input so argparse exits 2
+    with a usage error (fail fast, like the other CLI validations).
+    """
+    value = value.strip()
+    if not value.isdigit():
+        raise argparse.ArgumentTypeError(
+            f"invalid depth {value!r}: expected a non-negative integer")
+    return int(value)
+
+
 def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
                mimetypes=None, collapse="urlkey", since=None, until=None):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
@@ -267,7 +280,7 @@ def _url_depth(url):
 
 def analyze(entries, include_exts=None, exclude_exts=None,
             interesting_exts=None, exclude_hosts=None,
-            exclude_paths=None,
+            exclude_paths=None, min_depth=None, max_depth=None,
             robots_disallow=None, robots_allow=None):
     """Split entries into js / params / param_names / interesting / all buckets
     (deduped, sorted), plus a first_seen/last_seen timeline per URL from the
@@ -283,7 +296,10 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     bucketing, so every mode, the subdomain rollup, and --json stay
     consistent. exclude_paths: drop entries whose URL path starts with
     any of these prefixes (literal prefix match, case-sensitive, query
-    strings ignored), also before bucketing. All default to None, meaning
+    strings ignored), also before bucketing. min_depth/max_depth: keep
+    only entries whose path depth (see _url_depth) is within the range,
+    also before bucketing, so every mode, rollup, and --json/--csv stays
+    consistent. All default to None, meaning
     no filtering and the built-in interesting set.
 
     The `statuses` bucket maps each HTTP status code to the count of deduped
@@ -354,6 +370,11 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         entry_path = urllib.parse.urlparse(url).path
         if any(entry_path.startswith(p) for p in exc_paths):
             continue
+        depth = _url_depth(url)
+        if min_depth is not None and depth < min_depth:
+            continue
+        if max_depth is not None and depth > max_depth:
+            continue
         ext = _ext(url)
         if inc and ext not in inc:
             continue
@@ -386,7 +407,6 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         status_counts[code] = status_counts.get(code, 0) + 1
         mt = (e.get("mimetype") or "").strip().lower() or "?"
         mimetype_counts[mt] = mimetype_counts.get(mt, 0) + 1
-        depth = _url_depth(url)
         depth_counts[depth] = depth_counts.get(depth, 0) + 1
         host = urllib.parse.urlparse(url).hostname
         if host:
@@ -768,6 +788,19 @@ def main(argv=None):
                          "(literal prefix match, case-sensitive, query "
                          "strings ignored); applied before bucketing so "
                          "all modes and --json/--csv stay consistent")
+    ap.add_argument("--min-depth", dest="min_depth",
+                    type=parse_depth_bound, default=None, metavar="N",
+                    help="keep only archived URLs with path depth >= N "
+                         "(depth 0 = the bare host, e.g. '--min-depth 2' "
+                         "focuses on deeper trees); applied before "
+                         "bucketing so all modes and --json/--csv stay "
+                         "consistent")
+    ap.add_argument("--max-depth", dest="max_depth",
+                    type=parse_depth_bound, default=None, metavar="N",
+                    help="keep only archived URLs with path depth <= N "
+                         "(e.g. '--max-depth 1' focuses on the shallow "
+                         "surface); applied before bucketing so all "
+                         "modes and --json/--csv stay consistent")
     ap.add_argument("--interesting-exts", dest="interesting_exts",
                     type=parse_extensions, default=None, metavar="EXTS",
                     help="override the built-in interesting-file extension set, "
@@ -787,6 +820,10 @@ def main(argv=None):
     if (args.since is not None and args.until is not None
             and _padded_bound(args.since, "0") > _padded_bound(args.until, "9")):
         ap.error("--since must not be after --until")
+
+    if (args.min_depth is not None and args.max_depth is not None
+            and args.min_depth > args.max_depth):
+        ap.error("--min-depth must not be greater than --max-depth")
 
     try:
         entries = fetch_cdx(args.domain, limit=args.limit,
@@ -813,6 +850,7 @@ def main(argv=None):
                       interesting_exts=args.interesting_exts,
                       exclude_hosts=args.exclude_host,
                       exclude_paths=args.exclude_path,
+                      min_depth=args.min_depth, max_depth=args.max_depth,
                       robots_disallow=disallows, robots_allow=allows)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,

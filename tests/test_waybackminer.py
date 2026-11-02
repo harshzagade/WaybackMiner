@@ -1439,3 +1439,69 @@ class TestExcludePath(unittest.TestCase):
         with self.assertRaises(SystemExit) as cm:
             wm.main(["example.com", "--exclude-path", "admin"])
         self.assertEqual(cm.exception.code, 2)
+
+
+class TestDepthBounds(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/", "statuscode": "200"},
+            {"original": "http://example.com/a", "statuscode": "200"},
+            {"original": "http://example.com/a/b", "statuscode": "200"},
+            {"original": "http://example.com/a/b/c", "statuscode": "200"},
+            {"original": "http://example.com/a/b/", "statuscode": "200"},
+        ]
+
+    def test_min_depth_keeps_deep_only(self):
+        buckets = wm.analyze(self._entries(), min_depth=2)
+        self.assertEqual(buckets["all"], [
+            "http://example.com/a/b",
+            "http://example.com/a/b/",
+            "http://example.com/a/b/c"])
+
+    def test_max_depth_keeps_shallow_only(self):
+        buckets = wm.analyze(self._entries(), max_depth=1)
+        self.assertEqual(buckets["all"], [
+            "http://example.com/",
+            "http://example.com/a"])
+
+    def test_range_bounds_inclusive(self):
+        buckets = wm.analyze(self._entries(), min_depth=1, max_depth=2)
+        self.assertEqual(buckets["all"], [
+            "http://example.com/a",
+            "http://example.com/a/b",
+            "http://example.com/a/b/"])
+
+    def test_bounds_filter_rollups_too(self):
+        buckets = wm.analyze(self._entries(), min_depth=3)
+        self.assertEqual(buckets["depths"], {3: 1})
+        self.assertEqual(buckets["all"],
+                         ["http://example.com/a/b/c"])
+
+    def test_trailing_slash_does_not_add_depth(self):
+        buckets = wm.analyze(self._entries(), min_depth=2, max_depth=2)
+        self.assertIn("http://example.com/a/b/", buckets["all"])
+
+    def test_parse_rejects_negative_and_non_numeric(self):
+        for bad in ("-1", "abc", "1.5", ""):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                wm.parse_depth_bound(bad)
+
+    def test_cli_min_greater_than_max_exits_2(self):
+        with self.assertRaises(SystemExit) as cm:
+            wm.main(["example.com", "--min-depth", "3",
+                     "--max-depth", "1"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_cli_negative_depth_exits_2(self):
+        with self.assertRaises(SystemExit) as cm:
+            wm.main(["example.com", "--min-depth", "-1"])
+        self.assertEqual(cm.exception.code, 2)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--min-depth", "1", "--js-only"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(),
+                         "http://example.com/app.js")
