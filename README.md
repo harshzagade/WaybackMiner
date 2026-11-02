@@ -115,6 +115,13 @@ top 20 types, count desc); the `--json` report carries the same counts
 under the `mimetypes` key. Mimetypes are lowercased, and entries with no
 mimetype land under `?`.
 
+It also flags paths served under two or more hosts (a `[=] Shared paths`
+section, host count desc — mirrors and staging copies of the same path);
+the `--json` report carries them under the `shared_paths` key as
+path/host_count/hosts/urls records. Query strings are ignored for
+grouping and hostnames are case-insensitive, so `/app/login` on
+`example.com` and `staging.example.com` is one shared path.
+
 With `--js-only`, the tool prints just the JS URL list (one per line) so you
 can pipe it straight into other tools. With `--params-only`, it prints the
 unique query-parameter names across the domain (sorted, one per line) — a

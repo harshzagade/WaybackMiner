@@ -4,6 +4,13 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Same-path-across-hosts report: the text summary now shows a
+  `Shared paths` section (top 10, host count desc) listing URL paths
+  served under two or more hosts — mirrors and staging copies — with
+  their host lists; the same records ship in the `--json` report as
+  `shared_paths` (path/host_count/hosts/urls). Query strings are
+  ignored for grouping, hostnames are case-insensitive, and paths seen
+  under only one host are not reported.
 - `--min-depth` / `--max-depth` bounds: keep only archived URLs whose
   path depth (depth 0 = the bare host, trailing slashes ignored) falls
   within the range, applied before bucketing so all output modes,

@@ -141,7 +141,8 @@ class TestCli(unittest.TestCase):
                                      "interesting", "timeline", "subdomains",
                                      "statuses", "depths", "years", "mimetypes",
                                      "stale", "digest_clusters",
-                                     "robots_drift", "url_status"})
+                                     "robots_drift", "url_status",
+                                     "shared_paths"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -1505,3 +1506,65 @@ class TestDepthBounds(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertEqual(buf.getvalue().strip(),
                          "http://example.com/app.js")
+
+
+class TestSharedPaths(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/app/login", "statuscode": "200"},
+            {"original": "http://staging.example.com/app/login",
+             "statuscode": "200"},
+            {"original": "http://example.com/app/login?next=/home",
+             "statuscode": "200"},
+            {"original": "http://EXAMPLE.com/app/login", "statuscode": "200"},
+            {"original": "http://example.com/only-here", "statuscode": "200"},
+            {"original": "http://blog.example.com/only-here",
+             "statuscode": "200"},
+            {"original": "http://example.com/solo", "statuscode": "200"},
+        ]
+
+    def test_same_path_across_hosts_grouped(self):
+        buckets = wm.analyze(self._entries())
+        shared = {r["path"]: r for r in buckets["shared_paths"]}
+        self.assertEqual(shared["/app/login"]["hosts"],
+                         ["example.com", "staging.example.com"])
+        self.assertEqual(shared["/app/login"]["host_count"], 2)
+        self.assertIn("http://example.com/app/login?next=/home",
+                      shared["/app/login"]["urls"])
+
+    def test_host_case_does_not_create_extra_host(self):
+        buckets = wm.analyze(self._entries())
+        row = [r for r in buckets["shared_paths"]
+               if r["path"] == "/app/login"][0]
+        self.assertNotIn("EXAMPLE.com", row["hosts"])
+
+    def test_single_host_path_not_shared(self):
+        buckets = wm.analyze(self._entries())
+        paths = [r["path"] for r in buckets["shared_paths"]]
+        self.assertNotIn("/solo", paths)
+
+    def test_sorted_by_host_count_then_path(self):
+        entries = [
+            {"original": "http://a.example.com/x", "statuscode": "200"},
+            {"original": "http://b.example.com/x", "statuscode": "200"},
+            {"original": "http://c.example.com/x", "statuscode": "200"},
+            {"original": "http://a.example.com/y", "statuscode": "200"},
+            {"original": "http://b.example.com/y", "statuscode": "200"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual([r["path"] for r in buckets["shared_paths"]],
+                         ["/x", "/y"])
+
+    def test_json_carries_shared_paths(self):
+        buckets = wm.analyze(self._entries())
+        data = json.loads(wm.render_json(buckets))
+        self.assertIn("/only-here",
+                      [r["path"] for r in data["shared_paths"]])
+
+    def test_summary_shows_shared_paths_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        self.assertIn("Shared paths", buf.getvalue())
+        self.assertIn("/app/login", buf.getvalue())

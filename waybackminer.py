@@ -340,6 +340,12 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     query) is now disallowed — paths that were crawlable when archived
     but are blocked today — as url/pattern records sorted by URL.
     Without patterns the bucket is empty.
+
+    The `shared_paths` bucket lists URL paths served under two or more
+    hosts (mirrors, staging copies) as path/host_count/hosts/urls
+    records, sorted by host count desc then path asc. Query strings are
+    ignored for grouping and hostnames are case-insensitive; a path seen
+    under only one host is not a shared path.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -357,6 +363,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     depth_counts = {}
     mimetype_counts = {}
     digest_groups = {}
+    path_groups = {}
     robots_drift = []
     disallow_patterns = list(robots_disallow or ())
     allow_patterns = list(robots_allow or ())
@@ -411,6 +418,10 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         host = urllib.parse.urlparse(url).hostname
         if host:
             rollup[host] = rollup.get(host, 0) + 1
+            group = path_groups.setdefault(entry_path, {"hosts": set(),
+                                                        "urls": []})
+            group["hosts"].add(host.lower())
+            group["urls"].append(url)
         if ext == ".js" or e.get("mimetype", "").find("javascript") != -1:
             buckets["js"].append(url)
         query = urllib.parse.urlparse(url).query
@@ -464,13 +475,24 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         for d, urls in sorted(digest_groups.items(),
                               key=lambda kv: (-len(kv[1]), kv[0]))
         if len(urls) >= 2]
+    # shared paths: the same URL path served under two or more hosts
+    # (mirrors, staging copies), as path/host_count/hosts/urls records
+    # sorted by host count desc then path asc; query strings are ignored
+    # for grouping, hostnames are case-insensitive, single-host paths
+    # are not shared paths
+    buckets["shared_paths"] = [
+        {"path": p, "host_count": len(g["hosts"]),
+         "hosts": sorted(g["hosts"]), "urls": sorted(g["urls"])}
+        for p, g in sorted(path_groups.items(),
+                           key=lambda kv: (-len(kv[1]["hosts"]), kv[0]))
+        if len(g["hosts"]) >= 2]
     # robots drift: archived URLs now blocked by the live robots.txt,
     # sorted by URL (drift is computed per deduped URL, so already unique)
     buckets["robots_drift"] = sorted(robots_drift, key=lambda r: r["url"])
     for k in buckets:
         if k not in ("param_names", "timeline", "url_status", "subdomains",
                      "statuses", "depths", "years", "mimetypes", "stale",
-                     "digest_clusters", "robots_drift"):
+                     "digest_clusters", "robots_drift", "shared_paths"):
             buckets[k].sort()
     return buckets
 
@@ -695,6 +717,12 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
                 print(f"           {u}")
             if len(cluster["urls"]) > 5:
                 print(f"           ... and {len(cluster['urls']) - 5} more")
+    if buckets["shared_paths"]:
+        print("\n[=] Shared paths (same path under multiple hosts, "
+              f"first {min(10, len(buckets['shared_paths']))}):")
+        for row in buckets["shared_paths"][:10]:
+            print(f"  {row['host_count']:>6} hosts  {row['path']}")
+            print(f"           {', '.join(row['hosts'])}")
     if buckets["robots_drift"]:
         print("\n[!] Now disallowed by robots.txt "
               f"(archived but blocked today, first 20):")
