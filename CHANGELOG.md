@@ -4,6 +4,13 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Largest-captures view: the CDX `length` field is now fetched and the
+  text summary shows a `Largest captures` section (top 10 deduped URLs
+  by archived response byte size, length desc then URL asc); the same
+  records ship in the `--json` report as `largest_captures`
+  (url/length). Captures with no usable length ("-", missing,
+  non-numeric) are skipped, and a duplicate capture keeps its URL's
+  first length.
 - Scheme rollup: the text summary now shows a `Schemes` section
   (deduped-URL counts per URL scheme, count desc then scheme asc;
   schemes lowercased, scheme-less entries under `?`); the same counts

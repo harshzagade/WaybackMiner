@@ -222,7 +222,9 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
     ... up to 'YYYYMMDDHHMMSS') sent as the CDX 'from'/'to' params.
     The CDX `digest` field is also fetched: identical digests across
     different URLs mean the same response body was served at many paths
-    (see the `digest_clusters` bucket in analyze()).
+    (see the `digest_clusters` bucket in analyze()). The CDX `length`
+    field is fetched too: it is the archived response's byte size, used
+    for the `largest_captures` view in analyze().
     """
     expr = "|".join(str(s) for s in statuses)
     if len(statuses) > 1:
@@ -230,7 +232,7 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
     params = [
         ("url", f"{domain}/*"),
         ("output", "json"),
-        ("fl", "timestamp,original,statuscode,mimetype,digest"),
+        ("fl", "timestamp,original,statuscode,mimetype,digest,length"),
         ("filter", f"statuscode:{expr}"),
         ("collapse", collapse),
         ("limit", str(limit)),
@@ -266,6 +268,23 @@ def _ext(url):
     dot = path.rfind(".")
     slash = path.rfind("/")
     return path[dot:].lower() if dot > slash else ""
+
+
+def _parse_length(value):
+    """CDX `length` (archived response byte size) as an int, or None.
+
+    The CDX API returns the size as a digit string; "-" (unknown) and
+    missing/non-numeric values are not sizes, so they yield None rather
+    than a made-up zero — a missing length must not outrank a real one
+    or masquerade as an empty response.
+    """
+    if isinstance(value, int):
+        return value if value >= 0 else None
+    if isinstance(value, str):
+        value = value.strip()
+        if value.isdigit():
+            return int(value)
+    return None
 
 
 def _url_depth(url):
@@ -351,6 +370,14 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     records, sorted by host count desc then path asc. Query strings are
     ignored for grouping and hostnames are case-insensitive; a path seen
     under only one host is not a shared path.
+
+    The `largest_captures` bucket lists the deduped URLs with the
+    biggest archived responses (top 10, as url/length records sorted by
+    length desc then URL asc) from the CDX `length` field — the
+    heaviest archived payloads, e.g. large dumps or media files.
+    Entries with no usable length ("-", missing, non-numeric) are
+    skipped, and a duplicate capture does not change its URL's length:
+    the first entry's length wins, matching the digest handling.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -370,6 +397,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     scheme_counts = {}
     digest_groups = {}
     path_groups = {}
+    url_length = {}
     robots_drift = []
     disallow_patterns = list(robots_disallow or ())
     allow_patterns = list(robots_allow or ())
@@ -410,6 +438,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         digest = e.get("digest") or None
         if digest:
             digest_groups.setdefault(digest, []).append(url)
+        length = _parse_length(e.get("length"))
+        if length is not None:
+            url_length[url] = length
         if disallow_patterns:
             parsed = urllib.parse.urlparse(url)
             path_q = parsed.path + ("?" + parsed.query if parsed.query else "")
@@ -502,10 +533,15 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     # robots drift: archived URLs now blocked by the live robots.txt,
     # sorted by URL (drift is computed per deduped URL, so already unique)
     buckets["robots_drift"] = sorted(robots_drift, key=lambda r: r["url"])
+    # largest captures: biggest archived responses first (top 10),
+    # length desc then URL asc as the tiebreak; length-less URLs skipped
+    buckets["largest_captures"] = [
+        {"url": u, "length": url_length[u]}
+        for u in sorted(url_length, key=lambda u: (-url_length[u], u))[:10]]
     for k in buckets:
         if k not in ("param_names", "timeline", "url_status", "subdomains",
                      "statuses", "depths", "years", "mimetypes", "schemes",
-                     "stale",
+                     "largest_captures", "stale",
                      "digest_clusters", "robots_drift", "shared_paths"):
             buckets[k].sort()
     return buckets
@@ -727,6 +763,11 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         print("\n[=] Schemes (deduped URLs per scheme):")
         for scheme, count in buckets["schemes"].items():
             print(f"  {count:>6}  {scheme}")
+    if buckets["largest_captures"]:
+        print("\n[=] Largest captures (by CDX response length, "
+              f"top {len(buckets['largest_captures'])}):")
+        for row in buckets["largest_captures"]:
+            print(f"  {row['length']:>10}  {row['url']}")
     if buckets["digest_clusters"]:
         print("\n[=] Duplicate content (same CDX digest, multiple URLs):")
         for cluster in buckets["digest_clusters"][:10]:

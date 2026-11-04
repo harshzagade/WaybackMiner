@@ -115,6 +115,12 @@ top 20 types, count desc); the `--json` report carries the same counts
 under the `mimetypes` key. Mimetypes are lowercased, and entries with no
 mimetype land under `?`.
 
+It also lists the largest archived responses (a `[=] Largest captures`
+section, top 10 by CDX `length` in bytes, length desc) so heavy payloads
+such as large dumps stand out; the `--json` report carries the same
+records under the `largest_captures` key. Captures with no usable length
+are skipped.
+
 It also rolls them up by URL scheme (a `[=] Schemes` section, count desc)
 so a legacy http-only slice of the archived surface stands out against
 the https majority; the `--json` report carries the same counts under

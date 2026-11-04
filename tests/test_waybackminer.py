@@ -140,7 +140,8 @@ class TestCli(unittest.TestCase):
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
                                      "statuses", "depths", "years", "mimetypes",
-                                     "schemes", "stale", "digest_clusters",
+                                     "schemes", "largest_captures",
+                                     "stale", "digest_clusters",
                                      "robots_drift", "url_status",
                                      "shared_paths"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
@@ -1604,3 +1605,67 @@ class TestSchemeRollup(unittest.TestCase):
         buckets = wm.analyze(self._entries())
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["schemes"]["https"], 2)
+
+
+class TestLargestCaptures(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/small", "statuscode": "200",
+             "length": "100"},
+            {"original": "http://example.com/big", "statuscode": "200",
+             "length": "99999"},
+            {"original": "http://example.com/mid", "statuscode": "200",
+             "length": "5000"},
+            {"original": "http://example.com/unknown", "statuscode": "200",
+             "length": "-"},
+            {"original": "http://example.com/nolength", "statuscode": "200"},
+            {"original": "http://example.com/big", "statuscode": "200",
+             "length": "1"},  # dup URL: first length wins
+        ]
+
+    def test_sorted_by_length_desc(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual([(r["url"], r["length"])
+                          for r in buckets["largest_captures"]],
+                         [("http://example.com/big", 99999),
+                          ("http://example.com/mid", 5000),
+                          ("http://example.com/small", 100)])
+
+    def test_unknown_and_missing_lengths_skipped(self):
+        buckets = wm.analyze(self._entries())
+        urls = [r["url"] for r in buckets["largest_captures"]]
+        self.assertNotIn("http://example.com/unknown", urls)
+        self.assertNotIn("http://example.com/nolength", urls)
+
+    def test_top_ten_cap_and_url_tiebreak(self):
+        entries = [{"original": f"http://example.com/f{i:02d}",
+                    "statuscode": "200", "length": "1000"}
+                   for i in range(12)]
+        buckets = wm.analyze(entries)
+        self.assertEqual(len(buckets["largest_captures"]), 10)
+        self.assertEqual(buckets["largest_captures"][0]["url"],
+                         "http://example.com/f00")
+
+    def test_summary_shows_largest_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("Largest captures", out)
+        self.assertIn("http://example.com/big", out)
+
+    def test_json_carries_largest_captures(self):
+        buckets = wm.analyze(self._entries())
+        data = json.loads(wm.render_json(buckets))
+        self.assertEqual(data["largest_captures"][0],
+                         {"url": "http://example.com/big",
+                          "length": 99999})
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_fetch_requests_length_field(self, _):
+        with mock.patch("urllib.request.urlopen",
+                        wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com")
+            req = m.call_args[0][0]
+            self.assertIn("length", req.full_url)
