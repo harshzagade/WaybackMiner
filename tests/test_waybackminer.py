@@ -140,7 +140,7 @@ class TestCli(unittest.TestCase):
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
                                      "statuses", "depths", "years", "mimetypes",
-                                     "stale", "digest_clusters",
+                                     "schemes", "stale", "digest_clusters",
                                      "robots_drift", "url_status",
                                      "shared_paths"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
@@ -1568,3 +1568,39 @@ class TestSharedPaths(unittest.TestCase):
             wm.print_report(buckets)
         self.assertIn("Shared paths", buf.getvalue())
         self.assertIn("/app/login", buf.getvalue())
+
+
+class TestSchemeRollup(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200"},
+            {"original": "https://example.com/b", "statuscode": "200"},
+            {"original": "HTTPS://example.com/c", "statuscode": "200"},
+            {"original": "http://example.com/a", "statuscode": "200"},
+            # dup URL: counted once
+            {"original": "example.com/noscheme", "statuscode": "200"},
+        ]
+
+    def test_scheme_bucket_counts_deduped_urls(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["schemes"],
+                         {"https": 2, "http": 1, "?": 1})
+
+    def test_scheme_sorted_by_count_desc_then_name(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(list(buckets["schemes"]),
+                         ["https", "?", "http"])
+
+    def test_summary_shows_schemes_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] Schemes", out)
+        self.assertIn("https", out)
+
+    def test_json_includes_schemes(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["schemes"]["https"], 2)

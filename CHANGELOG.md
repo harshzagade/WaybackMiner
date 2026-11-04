@@ -4,6 +4,11 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Scheme rollup: the text summary now shows a `Schemes` section
+  (deduped-URL counts per URL scheme, count desc then scheme asc;
+  schemes lowercased, scheme-less entries under `?`); the same counts
+  ship in the `--json` report as the `schemes` key, so legacy http-only
+  surface stands out against the https majority.
 - Same-path-across-hosts report: the text summary now shows a
   `Shared paths` section (top 10, host count desc) listing URL paths
   served under two or more hosts — mirrors and staging copies — with

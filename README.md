@@ -115,6 +115,12 @@ top 20 types, count desc); the `--json` report carries the same counts
 under the `mimetypes` key. Mimetypes are lowercased, and entries with no
 mimetype land under `?`.
 
+It also rolls them up by URL scheme (a `[=] Schemes` section, count desc)
+so a legacy http-only slice of the archived surface stands out against
+the https majority; the `--json` report carries the same counts under
+the `schemes` key. Schemes are lowercased, and scheme-less entries land
+under `?`.
+
 It also flags paths served under two or more hosts (a `[=] Shared paths`
 section, host count desc — mirrors and staging copies of the same path);
 the `--json` report carries them under the `shared_paths` key as

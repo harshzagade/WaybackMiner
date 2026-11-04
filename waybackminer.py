@@ -324,6 +324,11 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     the makeup of the archived surface (how much is HTML vs JS vs images)
     is visible at a glance.
 
+    The `schemes` bucket maps each URL scheme to the count of deduped
+    URLs captured with it (normalized to lowercase, scheme-less entries
+    land under "?"), sorted by count desc then scheme asc, so legacy
+    http-only surface stands out against the https majority.
+
     The `stale` bucket lists the URLs whose `last_seen` is the oldest (top
     10, as url/last_seen records) — the pages most likely abandoned.
 
@@ -362,6 +367,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     url_status = {}
     depth_counts = {}
     mimetype_counts = {}
+    scheme_counts = {}
     digest_groups = {}
     path_groups = {}
     robots_drift = []
@@ -414,6 +420,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         status_counts[code] = status_counts.get(code, 0) + 1
         mt = (e.get("mimetype") or "").strip().lower() or "?"
         mimetype_counts[mt] = mimetype_counts.get(mt, 0) + 1
+        scheme = urllib.parse.urlparse(url).scheme.lower() or "?"
+        scheme_counts[scheme] = scheme_counts.get(scheme, 0) + 1
         depth_counts[depth] = depth_counts.get(depth, 0) + 1
         host = urllib.parse.urlparse(url).hostname
         if host:
@@ -464,6 +472,11 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["mimetypes"] = {m: mimetype_counts[m] for m in
                             sorted(mimetype_counts,
                                    key=lambda m: (-mimetype_counts[m], m))}
+    # scheme rollup: scheme -> count of deduped URLs, sorted by count
+    # desc then scheme asc (same ordering as the mimetype rollup)
+    buckets["schemes"] = {s: scheme_counts[s] for s in
+                          sorted(scheme_counts,
+                                 key=lambda s: (-scheme_counts[s], s))}
     # stale captures: the URLs whose last capture is the oldest (top 10),
     # i.e. the pages most likely abandoned — carried as url/last_seen records
     buckets["stale"] = [{"url": u, "last_seen": ts}
@@ -491,7 +504,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["robots_drift"] = sorted(robots_drift, key=lambda r: r["url"])
     for k in buckets:
         if k not in ("param_names", "timeline", "url_status", "subdomains",
-                     "statuses", "depths", "years", "mimetypes", "stale",
+                     "statuses", "depths", "years", "mimetypes", "schemes",
+                     "stale",
                      "digest_clusters", "robots_drift", "shared_paths"):
             buckets[k].sort()
     return buckets
@@ -709,6 +723,10 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
             print(f"  {count:>6}  {mt}")
         if len(buckets["mimetypes"]) > 20:
             print(f"  ... and {len(buckets['mimetypes']) - 20} more")
+    if buckets["schemes"]:
+        print("\n[=] Schemes (deduped URLs per scheme):")
+        for scheme, count in buckets["schemes"].items():
+            print(f"  {count:>6}  {scheme}")
     if buckets["digest_clusters"]:
         print("\n[=] Duplicate content (same CDX digest, multiple URLs):")
         for cluster in buckets["digest_clusters"][:10]:
