@@ -17,6 +17,7 @@ touches the target itself.
 - **URLs with query parameters** — injection surface
 - **Interesting files** — `.php`, `.bak`, `.sql`, `.env`, `.json`, `.git`, …
 - **Duplicate content clusters** — URLs that served the identical response body (same CDX digest), i.e. the same page at many paths
+- **Extension rollup** — archived-URL counts per file extension, so the makeup of the archived surface is visible at a glance
 - **robots.txt drift** (opt-in `--robots-drift`) — archived URLs that the domain's current robots.txt now blocks
 
 ## Install

@@ -343,6 +343,14 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     the makeup of the archived surface (how much is HTML vs JS vs images)
     is visible at a glance.
 
+    The `extensions` bucket maps each file extension to the count of
+    deduped URLs carrying it (from the URL path, lowercased; extensionless
+    URLs land under "?"), sorted by count desc then extension asc, so the
+    makeup of the archived surface — how much of it is .php vs .js vs
+    extensionless routes — is visible at a glance. Extension counts are
+    computed after the include/exclude/depth filters, like the other
+    rollups, so a filtered run's rollup describes the filtered set.
+
     The `schemes` bucket maps each URL scheme to the count of deduped
     URLs captured with it (normalized to lowercase, scheme-less entries
     land under "?"), sorted by count desc then scheme asc, so legacy
@@ -393,6 +401,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     status_counts = {}
     url_status = {}
     depth_counts = {}
+    ext_counts = {}
     mimetype_counts = {}
     scheme_counts = {}
     digest_groups = {}
@@ -454,6 +463,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         scheme = urllib.parse.urlparse(url).scheme.lower() or "?"
         scheme_counts[scheme] = scheme_counts.get(scheme, 0) + 1
         depth_counts[depth] = depth_counts.get(depth, 0) + 1
+        ext_key = ext or "?"
+        ext_counts[ext_key] = ext_counts.get(ext_key, 0) + 1
         host = urllib.parse.urlparse(url).hostname
         if host:
             rollup[host] = rollup.get(host, 0) + 1
@@ -498,6 +509,11 @@ def analyze(entries, include_exts=None, exclude_exts=None,
             year = ts[:4]
             year_counts[year] = year_counts.get(year, 0) + 1
     buckets["years"] = {y: year_counts[y] for y in sorted(year_counts)}
+    # extension rollup: extension -> count of deduped URLs, sorted by
+    # count desc then extension asc (same ordering as the mimetype rollup)
+    buckets["extensions"] = {e: ext_counts[e] for e in
+                             sorted(ext_counts,
+                                    key=lambda e: (-ext_counts[e], e))}
     # mimetype rollup: mimetype -> count of deduped URLs, sorted by count
     # desc then mimetype asc (same ordering as the subdomain rollup)
     buckets["mimetypes"] = {m: mimetype_counts[m] for m in
@@ -540,7 +556,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         for u in sorted(url_length, key=lambda u: (-url_length[u], u))[:10]]
     for k in buckets:
         if k not in ("param_names", "timeline", "url_status", "subdomains",
-                     "statuses", "depths", "years", "mimetypes", "schemes",
+                     "statuses", "depths", "years", "extensions",
+                     "mimetypes", "schemes",
                      "largest_captures", "stale",
                      "digest_clusters", "robots_drift", "shared_paths"):
             buckets[k].sort()
@@ -779,6 +796,12 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
             print(f"  {count:>6}  {mt}")
         if len(buckets["mimetypes"]) > 20:
             print(f"  ... and {len(buckets['mimetypes']) - 20} more")
+    if buckets["extensions"]:
+        print("\n[=] Extensions (deduped URLs per file extension, top 20):")
+        for ext, count in list(buckets["extensions"].items())[:20]:
+            print(f"  {count:>6}  {ext}")
+        if len(buckets["extensions"]) > 20:
+            print(f"  ... and {len(buckets['extensions']) - 20} more")
     if buckets["schemes"]:
         print("\n[=] Schemes (deduped URLs per scheme):")
         for scheme, count in buckets["schemes"].items():

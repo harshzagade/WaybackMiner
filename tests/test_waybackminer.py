@@ -140,6 +140,7 @@ class TestCli(unittest.TestCase):
         self.assertEqual(set(data), {"all", "js", "params", "param_names",
                                      "interesting", "timeline", "subdomains",
                                      "statuses", "depths", "years", "mimetypes",
+                                     "extensions",
                                      "schemes", "largest_captures",
                                      "stale", "digest_clusters",
                                      "robots_drift", "url_status",
@@ -1732,3 +1733,51 @@ class TestSnapshotLinks(unittest.TestCase):
             self.assertIn(
                 "https://web.archive.org/web/20240105000000/http://example.com/app.js",
                 lines)
+
+
+class TestExtensionRollup(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a.php", "statuscode": "200"},
+            {"original": "http://example.com/b.php", "statuscode": "200"},
+            {"original": "http://example.com/c.js", "statuscode": "200"},
+            {"original": "http://example.com/d", "statuscode": "200"},
+            {"original": "http://example.com/e", "statuscode": "200"},
+            {"original": "http://example.com/f.PHP", "statuscode": "200"},
+            {"original": "http://example.com/a.php", "statuscode": "200"},
+        ]
+
+    def test_extension_bucket_counts_deduped_urls(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["extensions"],
+                         {".php": 3, "?": 2, ".js": 1})
+
+    def test_extension_sorted_by_count_desc_then_name(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(list(buckets["extensions"]),
+                         [".php", "?", ".js"])
+
+    def test_extensionless_urls_land_under_question_mark(self):
+        buckets = wm.analyze([
+            {"original": "http://example.com/noext", "statuscode": "200"},
+            {"original": "http://example.com/dir/", "statuscode": "200"},
+        ])
+        self.assertEqual(buckets["extensions"], {"?": 2})
+
+    def test_rollup_follows_ext_filter(self):
+        buckets = wm.analyze(self._entries(), include_exts=[".php"])
+        self.assertEqual(buckets["extensions"], {".php": 3})
+
+    def test_summary_shows_extensions_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] Extensions", out)
+        self.assertIn(".php", out)
+
+    def test_json_includes_extensions(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["extensions"][".php"], 3)

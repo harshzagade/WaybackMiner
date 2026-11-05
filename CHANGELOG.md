@@ -4,6 +4,12 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Extension rollup: the text summary now shows an `Extensions`
+  section (deduped-URL counts per file extension, count desc then
+  extension asc, top 20; extensionless URLs under `?`); the same
+  counts ship in the `--json` report as the `extensions` key. Counts
+  are computed after the include/exclude/depth filters, like the other
+  rollups, so a filtered run's rollup describes the filtered set.
 - `--snapshot-links` mode: prints a Wayback snapshot URL per archived
   URL (newest capture, from the timeline's `last_seen`) instead of the
   original URL, for direct archive browsing — plain
