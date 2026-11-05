@@ -651,6 +651,20 @@ def fetch_robots_disallow(domain, timeout=30):
     return parse_robots(text)
 
 
+def snapshot_url(url, timestamp=None):
+    """Wayback snapshot URL for an archived URL.
+
+    With a timestamp (the URL's newest capture, its `last_seen`) the link
+    opens that exact capture; without one it is the bare
+    https://web.archive.org/web/<url> form, which redirects to the newest
+    capture. Plain form (no `id_` suffix) so the link opens the archived
+    page in the browser with the Wayback toolbar, for direct browsing.
+    """
+    if timestamp:
+        return f"https://web.archive.org/web/{timestamp}/{url}"
+    return f"https://web.archive.org/web/{url}"
+
+
 def render_json(buckets):
     """Return the full bucketed report as machine-readable JSON."""
     return json.dumps(buckets, indent=2)
@@ -682,12 +696,18 @@ def render_csv(buckets, file=None):
 
 
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
-               json_only=False, subdomains_only=False, csv_only=False):
+               json_only=False, subdomains_only=False, csv_only=False,
+               snapshot_links=False):
     if json_only:
         print(render_json(buckets))
         return
     if csv_only:
         render_csv(buckets)
+        return
+    if snapshot_links:
+        for u in buckets["all"]:
+            last = buckets["timeline"][u]["last_seen"]
+            print(snapshot_url(u, last))
         return
     if js_only:
         for u in buckets["js"]:
@@ -841,6 +861,12 @@ def main(argv=None):
                             "and one row per deduped archived URL (sorted); "
                             "combined with --output the CSV is written to "
                             "the file instead")
+    modes.add_argument("--snapshot-links", action="store_true",
+                       help="print a Wayback snapshot URL per archived URL "
+                            "(newest capture) instead of the original URL, "
+                            "for direct archive browsing; combined with "
+                            "--output the snapshot URLs are written to the "
+                            "file instead")
     ap.add_argument("--output", "-o", help="write full URL list to file")
     ap.add_argument("--dump-js", dest="dump_js", metavar="FILE",
                     help="write the JavaScript-file URLs bucket to FILE, one "
@@ -941,7 +967,8 @@ def main(argv=None):
                       robots_disallow=disallows, robots_allow=allows)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
-                 subdomains_only=args.subdomains_only, csv_only=args.csv)
+                 subdomains_only=args.subdomains_only, csv_only=args.csv,
+                 snapshot_links=args.snapshot_links)
     for path, items in ((args.dump_js, buckets["js"]),
                         (args.dump_params, buckets["params"])):
         if path is None:
@@ -958,6 +985,10 @@ def main(argv=None):
                 fh.write(render_json(buckets) + "\n")
             elif args.csv:
                 render_csv(buckets, file=fh)
+            elif args.snapshot_links:
+                fh.write("".join(
+                    snapshot_url(u, buckets["timeline"][u]["last_seen"]) + "\n"
+                    for u in buckets["all"]))
             else:
                 fh.write("\n".join(buckets["all"]) + "\n")
         print(f"\nwrote {len(buckets['all'])} URLs to {args.output}")

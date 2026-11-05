@@ -4,6 +4,15 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--snapshot-links` mode: prints a Wayback snapshot URL per archived
+  URL (newest capture, from the timeline's `last_seen`) instead of the
+  original URL, for direct archive browsing — plain
+  `https://web.archive.org/web/<timestamp>/<url>` form (no `id_`
+  suffix), so the link opens the archived page with the Wayback
+  toolbar. URLs with no known capture timestamp use the bare
+  `https://web.archive.org/web/<url>` form, which redirects to the
+  newest capture. Mutually exclusive with the other output modes;
+  combined with `--output`, the snapshot URLs are written to the file.
 - Largest-captures view: the CDX `length` field is now fetched and the
   text summary shows a `Largest captures` section (top 10 deduped URLs
   by archived response byte size, length desc then URL asc); the same

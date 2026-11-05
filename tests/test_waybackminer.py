@@ -1669,3 +1669,66 @@ class TestLargestCaptures(unittest.TestCase):
             wm.fetch_cdx("example.com")
             req = m.call_args[0][0]
             self.assertIn("length", req.full_url)
+
+
+class TestSnapshotLinks(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/page", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/page", "statuscode": "200",
+             "timestamp": "20240601000000"},  # dup: newest capture wins
+            {"original": "http://example.com/nodate", "statuscode": "200"},
+            {"original": "http://example.com/app.js", "statuscode": "200",
+             "mimetype": "application/javascript",
+             "timestamp": "20240202000000"},
+        ]
+
+    def test_snapshot_url_with_timestamp(self):
+        self.assertEqual(
+            wm.snapshot_url("http://example.com/page", "20240601000000"),
+            "https://web.archive.org/web/20240601000000/http://example.com/page")
+
+    def test_snapshot_url_without_timestamp_redirects_to_newest(self):
+        self.assertEqual(
+            wm.snapshot_url("http://example.com/page"),
+            "https://web.archive.org/web/http://example.com/page")
+
+    def test_mode_prints_newest_capture_links(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets, snapshot_links=True)
+        self.assertEqual(buf.getvalue().splitlines(), [
+            "https://web.archive.org/web/20240202000000/http://example.com/app.js",
+            "https://web.archive.org/web/http://example.com/nodate",
+            "https://web.archive.org/web/20240601000000/http://example.com/page",
+        ])
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_mode_conflicts_with_json(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--snapshot-links", "--json"])
+        self.assertEqual(cm.exception.code, 2)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_output_writes_snapshot_links(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "snaps.txt")
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--snapshot-links",
+                              "-o", path])
+            self.assertEqual(rc, 0)
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+            # SAMPLE_CDX dedupes to 5 URLs; each line is a snapshot link
+            self.assertEqual(len(lines), 5)
+            self.assertTrue(all(
+                l.startswith("https://web.archive.org/web/") for l in lines))
+            self.assertIn(
+                "https://web.archive.org/web/20240105000000/http://example.com/app.js",
+                lines)

@@ -52,6 +52,7 @@ python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only dep
 python3 waybackminer.py example.com --robots-drift  # archived URLs now blocked by robots.txt
 python3 waybackminer.py example.com --csv           # CSV: url,first_seen,last_seen,statuscode,depth
 python3 waybackminer.py example.com --csv -o out.csv  # write CSV to file
+python3 waybackminer.py example.com --snapshot-links  # Wayback snapshot URL per URL (newest capture)
 ```
 
 ## Sample run
