@@ -386,6 +386,14 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     Entries with no usable length ("-", missing, non-numeric) are
     skipped, and a duplicate capture does not change its URL's length:
     the first entry's length wins, matching the digest handling.
+
+    The `most_captured` bucket lists the deduped URLs with the most
+    CDX rows (top 10, as url/captures records sorted by capture count
+    desc then URL asc) — the pages the Wayback crawler re-captured
+    most often, i.e. the pages that kept changing or stayed important.
+    Only rows that pass the include/exclude/depth filters are counted,
+    so a filtered run's counts describe the filtered set; a URL seen
+    once has 1 capture.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -407,6 +415,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     digest_groups = {}
     path_groups = {}
     url_length = {}
+    capture_counts = {}
     robots_drift = []
     disallow_patterns = list(robots_disallow or ())
     allow_patterns = list(robots_allow or ())
@@ -433,6 +442,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         ts = e.get("timestamp") or None
         if url in seen:
             # duplicate capture of a known URL: only the timeline advances
+            # (and the per-URL capture count — a repeat CDX row is a
+            # re-capture of the same page)
+            capture_counts[url] += 1
             if ts is not None:
                 if first_seen[url] is None or ts < first_seen[url]:
                     first_seen[url] = ts
@@ -440,6 +452,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                     last_seen[url] = ts
             continue
         seen.add(url)
+        capture_counts[url] = 1
         buckets["all"].append(url)
         first_seen[url] = last_seen[url] = ts
         code = str(e.get("statuscode") or "?")
@@ -554,11 +567,17 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["largest_captures"] = [
         {"url": u, "length": url_length[u]}
         for u in sorted(url_length, key=lambda u: (-url_length[u], u))[:10]]
+    # most-captured URLs: most CDX rows first (top 10), capture count
+    # desc then URL asc as the tiebreak — the pages re-captured most
+    buckets["most_captured"] = [
+        {"url": u, "captures": capture_counts[u]}
+        for u in sorted(capture_counts,
+                        key=lambda u: (-capture_counts[u], u))[:10]]
     for k in buckets:
         if k not in ("param_names", "timeline", "url_status", "subdomains",
                      "statuses", "depths", "years", "extensions",
                      "mimetypes", "schemes",
-                     "largest_captures", "stale",
+                     "largest_captures", "most_captured", "stale",
                      "digest_clusters", "robots_drift", "shared_paths"):
             buckets[k].sort()
     return buckets
@@ -755,6 +774,11 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
               f"first {len(buckets['stale'])}):")
         for row in buckets["stale"]:
             print(f"  {row['last_seen']}  {row['url']}")
+    if buckets["most_captured"] and buckets["most_captured"][0]["captures"] > 1:
+        print(f"\n[=] Most-captured URLs (by CDX rows per URL, "
+              f"top {len(buckets['most_captured'])}):")
+        for row in buckets["most_captured"]:
+            print(f"  {row['captures']:>6}  {row['url']}")
     if len(buckets["statuses"]) > 1:
         print("\n[=] Status codes (deduped URLs per code):")
         for code, count in buckets["statuses"].items():

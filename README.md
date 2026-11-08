@@ -182,6 +182,16 @@ captures` section listing the URLs whose last capture is the oldest (the
 pages most likely abandoned); the same top-10 is in the `--json` report
 under the `stale` key.
 
+It also counts CDX rows per URL (a `[=] Most-captured URLs` section, top
+10 by row count, count desc) surfacing the pages the crawler re-captured
+most often; the `--json` report carries the same records under the
+`most_captured` key as url/captures records. The section only prints when
+at least one URL has more than one row: with the default `--collapse
+urlkey` each URL yields a single CDX row, so re-capture counts surface
+when running `--collapse digest`, where a URL re-captured with changed
+content returns one row per distinct response body. Counts are computed
+after the include/exclude/depth filters, like the other rollups.
+
 ## Screenshots
 
 Real run against `example.com` (a documentation-reserved domain — WaybackMiner

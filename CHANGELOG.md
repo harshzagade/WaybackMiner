@@ -4,6 +4,16 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Most-captured URLs view: the text summary now shows a
+  `[=] Most-captured URLs` section (top 10 deduped URLs by CDX row count,
+  count desc then URL asc) surfacing the pages re-captured most often;
+  the same records ship in the `--json` report as `most_captured`
+  (url/captures). The section only prints when at least one URL has more
+  than one row — with the default `--collapse urlkey` each URL yields
+  one CDX row, so the view is most useful with `--collapse digest`,
+  where a URL re-captured with changed content returns one row per
+  distinct response body. Counts are computed after the
+  include/exclude/depth filters, like the other rollups.
 - Extension rollup: the text summary now shows an `Extensions`
   section (deduped-URL counts per file extension, count desc then
   extension asc, top 20; extensionless URLs under `?`); the same

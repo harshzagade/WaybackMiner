@@ -142,6 +142,7 @@ class TestCli(unittest.TestCase):
                                      "statuses", "depths", "years", "mimetypes",
                                      "extensions",
                                      "schemes", "largest_captures",
+                                     "most_captured",
                                      "stale", "digest_clusters",
                                      "robots_drift", "url_status",
                                      "shared_paths"})
@@ -1670,6 +1671,68 @@ class TestLargestCaptures(unittest.TestCase):
             wm.fetch_cdx("example.com")
             req = m.call_args[0][0]
             self.assertIn("length", req.full_url)
+
+
+class TestMostCaptured(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/b", "statuscode": "200",
+             "timestamp": "20240102000000"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240103000000"},  # dup: 2nd capture of /a
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240104000000"},  # dup: 3rd capture of /a
+            {"original": "http://example.com/b", "statuscode": "200",
+             "timestamp": "20240105000000"},  # dup: 2nd capture of /b
+            {"original": "http://example.com/c", "statuscode": "200",
+             "timestamp": "20240106000000"},
+        ]
+
+    def test_counts_rows_per_url_sorted_by_count_desc(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["most_captured"],
+                         [{"url": "http://example.com/a", "captures": 3},
+                          {"url": "http://example.com/b", "captures": 2},
+                          {"url": "http://example.com/c", "captures": 1}])
+
+    def test_url_tiebreak_and_top_ten_cap(self):
+        entries = [{"original": f"http://example.com/f{i:02d}",
+                    "statuscode": "200", "timestamp": "20240101000000"}
+                   for i in range(12)]
+        entries.append({"original": "http://example.com/f00",
+                        "statuscode": "200", "timestamp": "20240102000000"})
+        buckets = wm.analyze(entries)
+        self.assertEqual(len(buckets["most_captured"]), 10)
+        self.assertEqual(buckets["most_captured"][0],
+                         {"url": "http://example.com/f00", "captures": 2})
+        # the other nine shown all have 1 capture, URL asc as tiebreak
+        self.assertEqual(buckets["most_captured"][1]["url"],
+                         "http://example.com/f01")
+
+    def test_summary_shows_section_only_when_a_url_was_recaptured(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("Most-captured URLs", out)
+        self.assertIn("3  http://example.com/a", out)
+        once = wm.analyze([{"original": "http://example.com/a",
+                            "statuscode": "200"},
+                           {"original": "http://example.com/b",
+                            "statuscode": "200"}])
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(once)
+        self.assertNotIn("Most-captured URLs", buf.getvalue())
+
+    def test_json_carries_most_captured(self):
+        buckets = wm.analyze(self._entries())
+        data = json.loads(wm.render_json(buckets))
+        self.assertEqual(data["most_captured"][0],
+                         {"url": "http://example.com/a", "captures": 3})
 
 
 class TestSnapshotLinks(unittest.TestCase):
