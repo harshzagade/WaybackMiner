@@ -359,6 +359,10 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     The `stale` bucket lists the URLs whose `last_seen` is the oldest (top
     10, as url/last_seen records) — the pages most likely abandoned.
 
+    The `newest` bucket mirrors it: the URLs whose `last_seen` is the
+    newest (top 10, as url/last_seen records) — the pages still being
+    re-crawled most recently, i.e. the live end of the archived surface.
+
     The `digest_clusters` bucket lists groups of two or more deduped URLs
     that share one CDX `digest` (the same response body served at many
     paths), as digest/count/urls records sorted by group size desc then
@@ -541,6 +545,10 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     # i.e. the pages most likely abandoned — carried as url/last_seen records
     buckets["stale"] = [{"url": u, "last_seen": ts}
                         for u, ts in oldest_captures(buckets["timeline"])]
+    # newest captures: the mirror of stale — the URLs whose last capture
+    # is the newest (top 10), i.e. the pages still being re-crawled
+    buckets["newest"] = [{"url": u, "last_seen": ts}
+                         for u, ts in newest_captures(buckets["timeline"])]
     # digest clusters: same response body at two or more deduped URLs,
     # largest groups first, digest asc as the tiebreak
     buckets["digest_clusters"] = [
@@ -578,6 +586,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                      "statuses", "depths", "years", "extensions",
                      "mimetypes", "schemes",
                      "largest_captures", "most_captured", "stale",
+                     "newest",
                      "digest_clusters", "robots_drift", "shared_paths"):
             buckets[k].sort()
     return buckets
@@ -602,6 +611,19 @@ def oldest_captures(timeline, n=10):
     dated = [(u, v["last_seen"]) for u, v in timeline.items()
              if v.get("last_seen")]
     dated.sort(key=lambda pair: pair[1])
+    return dated[:n]
+
+
+def newest_captures(timeline, n=10):
+    """Return the (url, last_seen) pairs with the newest last_seen, newest
+    first, capped at n. The mirror of oldest_captures: timestamps are
+    zero-padded YYYYMMDDHHMMSS, so lexicographic order is chronological.
+    URLs whose last capture timestamp is unknown are skipped. Recently
+    re-captured pages are the live end of the archived surface.
+    """
+    dated = [(u, v["last_seen"]) for u, v in timeline.items()
+             if v.get("last_seen")]
+    dated.sort(key=lambda pair: pair[1], reverse=True)
     return dated[:n]
 
 
@@ -773,6 +795,11 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         print(f"\n[~] Stale captures (oldest last_seen, "
               f"first {len(buckets['stale'])}):")
         for row in buckets["stale"]:
+            print(f"  {row['last_seen']}  {row['url']}")
+    if buckets["newest"]:
+        print(f"\n[+] Newest captures (newest last_seen, "
+              f"first {len(buckets['newest'])}):")
+        for row in buckets["newest"]:
             print(f"  {row['last_seen']}  {row['url']}")
     if buckets["most_captured"] and buckets["most_captured"][0]["captures"] > 1:
         print(f"\n[=] Most-captured URLs (by CDX rows per URL, "

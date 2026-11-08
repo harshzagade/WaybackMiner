@@ -180,7 +180,9 @@ so you can tell whether a forgotten file is still being re-crawled. The
 text summary shows the overall capture window too, plus a `[~] Stale
 captures` section listing the URLs whose last capture is the oldest (the
 pages most likely abandoned); the same top-10 is in the `--json` report
-under the `stale` key.
+under the `stale` key. A `[+] Newest captures` section mirrors it with
+the URLs whose last capture is the newest (the pages still being
+re-crawled); the same top-10 is under the `newest` key.
 
 It also counts CDX rows per URL (a `[=] Most-captured URLs` section, top
 10 by row count, count desc) surfacing the pages the crawler re-captured

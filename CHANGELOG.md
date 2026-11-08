@@ -4,6 +4,12 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Newest-captures view: the text summary now shows a `[+] Newest
+  captures` section (top 10 deduped URLs by newest `last_seen`, newest
+  first) mirroring the stale-captures view — the pages still being
+  re-crawled most recently; the same records ship in the `--json`
+  report as `newest` (url/last_seen). URLs with no known capture
+  timestamp are skipped, like the stale view.
 - Most-captured URLs view: the text summary now shows a
   `[=] Most-captured URLs` section (top 10 deduped URLs by CDX row count,
   count desc then URL asc) surfacing the pages re-captured most often;
