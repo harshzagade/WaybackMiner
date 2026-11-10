@@ -143,6 +143,7 @@ class TestCli(unittest.TestCase):
                                      "extensions",
                                      "schemes", "largest_captures",
                                      "most_captured", "size_bands",
+                                     "first_segments",
                                      "stale", "newest", "digest_clusters",
                                      "robots_drift", "url_status",
                                      "shared_paths"})
@@ -1970,3 +1971,59 @@ class TestResponseSizeBands(unittest.TestCase):
         buckets = wm.analyze(self._entries())
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["size_bands"]["10-100KB"], 1)
+
+class TestFirstSegmentRollup(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/blog/post-1", "statuscode": "200"},
+            {"original": "http://example.com/blog/post-2", "statuscode": "200"},
+            {"original": "http://example.com/blog/", "statuscode": "200"},
+            {"original": "http://example.com/admin/login", "statuscode": "200"},
+            {"original": "http://example.com/shop/item?x=1", "statuscode": "200"},
+            {"original": "http://example.com", "statuscode": "200"},
+            {"original": "http://example.com/", "statuscode": "200"},
+            {"original": "http://example.com/blog/post-1", "statuscode": "200"},
+        ]
+
+    def test_segments_count_deduped_urls(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["first_segments"],
+                         {"blog": 3, "?": 2, "admin": 1, "shop": 1})
+
+    def test_segments_sorted_by_count_desc_then_name(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(list(buckets["first_segments"]),
+                         ["blog", "?", "admin", "shop"])
+
+    def test_bare_host_and_root_land_under_question_mark(self):
+        buckets = wm.analyze([
+            {"original": "http://example.com", "statuscode": "200"},
+            {"original": "http://example.com/", "statuscode": "200"},
+        ])
+        self.assertEqual(buckets["first_segments"], {"?": 2})
+
+    def test_case_is_preserved(self):
+        buckets = wm.analyze([
+            {"original": "http://example.com/Blog/a", "statuscode": "200"},
+            {"original": "http://example.com/blog/b", "statuscode": "200"},
+        ])
+        self.assertEqual(buckets["first_segments"],
+                         {"Blog": 1, "blog": 1})
+
+    def test_rollup_follows_ext_filter(self):
+        buckets = wm.analyze(self._entries(), include_exts=[".php"])
+        self.assertEqual(buckets["first_segments"], {})
+
+    def test_summary_shows_first_segments_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] First path segments", out)
+        self.assertIn("/blog", out)
+
+    def test_json_includes_first_segments(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["first_segments"]["blog"], 3)

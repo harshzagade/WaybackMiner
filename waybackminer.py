@@ -319,6 +319,19 @@ def _url_depth(url):
     return len([seg for seg in path.split("/") if seg])
 
 
+def _first_segment(url):
+    """First path segment of a URL ("" when there is none).
+
+    The query string/fragment are ignored and empty segments are
+    skipped, so '/blog/post?x=1' and '/blog/' both yield 'blog', while
+    the bare host and '/' yield "". Case is preserved: URL paths are
+    case-sensitive, so '/Blog' and '/blog' are different sections.
+    """
+    path = urllib.parse.urlparse(url).path
+    segments = [seg for seg in path.split("/") if seg]
+    return segments[0] if segments else ""
+
+
 def analyze(entries, include_exts=None, exclude_exts=None,
             interesting_exts=None, exclude_hosts=None,
             exclude_paths=None, min_depth=None, max_depth=None,
@@ -428,6 +441,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     no usable length land under "?" (last); a duplicate capture does
     not change its URL's length — the first entry's length wins,
     matching the largest_captures handling.
+
+    The `first_segments` bucket maps each top-level path segment to the
+    count of deduped URLs under it (from the URL path, query ignored;
+    bare-host and root URLs land under "?"), sorted by count desc then
+    segment asc, so the biggest site sections — /blog vs /admin vs
+    /shop — stand out at a glance. Segment counts are computed after
+    the include/exclude/depth filters, like the other rollups.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -444,6 +464,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     url_status = {}
     depth_counts = {}
     ext_counts = {}
+    segment_counts = {}
     mimetype_counts = {}
     scheme_counts = {}
     digest_groups = {}
@@ -512,6 +533,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         depth_counts[depth] = depth_counts.get(depth, 0) + 1
         ext_key = ext or "?"
         ext_counts[ext_key] = ext_counts.get(ext_key, 0) + 1
+        seg_key = _first_segment(url) or "?"
+        segment_counts[seg_key] = segment_counts.get(seg_key, 0) + 1
         host = urllib.parse.urlparse(url).hostname
         if host:
             rollup[host] = rollup.get(host, 0) + 1
@@ -561,6 +584,12 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["extensions"] = {e: ext_counts[e] for e in
                              sorted(ext_counts,
                                     key=lambda e: (-ext_counts[e], e))}
+    # first-path-segment rollup: top-level segment -> count of deduped
+    # URLs, sorted by count desc then segment asc (same ordering as the
+    # extension rollup); bare-host/root URLs land under "?"
+    buckets["first_segments"] = {s: segment_counts[s] for s in
+                                 sorted(segment_counts,
+                                        key=lambda s: (-segment_counts[s], s))}
     # mimetype rollup: mimetype -> count of deduped URLs, sorted by count
     # desc then mimetype asc (same ordering as the subdomain rollup)
     buckets["mimetypes"] = {m: mimetype_counts[m] for m in
@@ -628,6 +657,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         if k not in ("param_names", "timeline", "url_status", "subdomains",
                      "statuses", "depths", "years", "extensions",
                      "mimetypes", "schemes", "size_bands",
+                     "first_segments",
                      "largest_captures", "most_captured", "stale",
                      "newest",
                      "digest_clusters", "robots_drift", "shared_paths"):
@@ -896,6 +926,14 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
             print(f"  {count:>6}  {ext}")
         if len(buckets["extensions"]) > 20:
             print(f"  ... and {len(buckets['extensions']) - 20} more")
+    if buckets["first_segments"]:
+        print("\n[=] First path segments (deduped URLs per top-level "
+              "path segment, top 20):")
+        for seg, count in list(buckets["first_segments"].items())[:20]:
+            label = f"/{seg}" if seg != "?" else "?"
+            print(f"  {count:>6}  {label}")
+        if len(buckets["first_segments"]) > 20:
+            print(f"  ... and {len(buckets['first_segments']) - 20} more")
     if buckets["schemes"]:
         print("\n[=] Schemes (deduped URLs per scheme):")
         for scheme, count in buckets["schemes"].items():

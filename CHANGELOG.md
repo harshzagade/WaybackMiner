@@ -11,6 +11,12 @@ All notable changes to WaybackMiner are documented here.
   `size_bands` key. Counts are computed after the include/exclude/depth
   filters, like the other rollups, and a duplicate capture keeps its
   URL's first length, matching the largest-captures handling.
+- First-path-segment rollup: the text summary now shows a `First path
+  segments` section (deduped-URL counts per top-level path segment,
+  count desc then segment asc, top 20; bare-host and root URLs under
+  `?`); the same counts ship in the `--json` report as the
+  `first_segments` key. Counts are computed after the
+  include/exclude/depth filters, like the other rollups.
 - Newest-captures view: the text summary now shows a `[+] Newest
   captures` section (top 10 deduped URLs by newest `last_seen`, newest
   first) mirroring the stale-captures view — the pages still being
