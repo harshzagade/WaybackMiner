@@ -287,6 +287,28 @@ def _parse_length(value):
     return None
 
 
+# Response-size bands for the size_bands rollup, in ascending order:
+# (upper bound in bytes, label). A length lands in the first band whose
+# bound it is below; lengths at or above the last bound land in ">1MB".
+SIZE_BANDS = [(10 * 1024, "<10KB"), (100 * 1024, "10-100KB"),
+              (1024 * 1024, "100KB-1MB")]
+
+
+def _size_band(length):
+    """Length band for one archived response byte size, or "?".
+
+    Bands are <10KB, 10-100KB, 100KB-1MB, and >1MB (bounds are binary
+    KiB/MiB, lower bound inclusive). A missing/unusable length is not a
+    size claim, so it lands under "?" like the other rollups.
+    """
+    if length is None:
+        return "?"
+    for bound, label in SIZE_BANDS:
+        if length < bound:
+            return label
+    return ">1MB"
+
+
 def _url_depth(url):
     """Number of path segments in a URL (depth 0 = the bare host).
 
@@ -398,6 +420,14 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     Only rows that pass the include/exclude/depth filters are counted,
     so a filtered run's counts describe the filtered set; a URL seen
     once has 1 capture.
+
+    The `size_bands` bucket maps each CDX `length` band to the count of
+    deduped URLs whose archived response falls in it (<10KB, 10-100KB,
+    100KB-1MB, >1MB), in ascending band order, so the payload-size
+    makeup of the archived surface is visible at a glance. URLs with
+    no usable length land under "?" (last); a duplicate capture does
+    not change its URL's length — the first entry's length wins,
+    matching the largest_captures handling.
     """
     inc = set(include_exts or ())
     exc = set(exclude_exts or ())
@@ -581,10 +611,23 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         {"url": u, "captures": capture_counts[u]}
         for u in sorted(capture_counts,
                         key=lambda u: (-capture_counts[u], u))[:10]]
+    # response-size bands: deduped-URL counts per CDX length band, in
+    # ascending band order with "?" (no usable length) last; computed
+    # from url_length so a duplicate capture keeps its first length
+    band_counts = {}
+    for length in url_length.values():
+        band = _size_band(length)
+        band_counts[band] = band_counts.get(band, 0) + 1
+    unknown = len(seen) - len(url_length)
+    if unknown:
+        band_counts["?"] = unknown
+    band_order = [label for _bound, label in SIZE_BANDS] + [">1MB", "?"]
+    buckets["size_bands"] = {b: band_counts[b] for b in band_order
+                             if b in band_counts}
     for k in buckets:
         if k not in ("param_names", "timeline", "url_status", "subdomains",
                      "statuses", "depths", "years", "extensions",
-                     "mimetypes", "schemes",
+                     "mimetypes", "schemes", "size_bands",
                      "largest_captures", "most_captured", "stale",
                      "newest",
                      "digest_clusters", "robots_drift", "shared_paths"):
@@ -862,6 +905,10 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
               f"top {len(buckets['largest_captures'])}):")
         for row in buckets["largest_captures"]:
             print(f"  {row['length']:>10}  {row['url']}")
+    if buckets["size_bands"]:
+        print("\n[=] Response sizes (deduped URLs per CDX length band):")
+        for band, count in buckets["size_bands"].items():
+            print(f"  {count:>6}  {band}")
     if buckets["digest_clusters"]:
         print("\n[=] Duplicate content (same CDX digest, multiple URLs):")
         for cluster in buckets["digest_clusters"][:10]:

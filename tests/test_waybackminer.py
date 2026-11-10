@@ -142,7 +142,7 @@ class TestCli(unittest.TestCase):
                                      "statuses", "depths", "years", "mimetypes",
                                      "extensions",
                                      "schemes", "largest_captures",
-                                     "most_captured",
+                                     "most_captured", "size_bands",
                                      "stale", "newest", "digest_clusters",
                                      "robots_drift", "url_status",
                                      "shared_paths"})
@@ -1906,3 +1906,67 @@ class TestExtensionRollup(unittest.TestCase):
         buckets = wm.analyze(self._entries())
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["extensions"][".php"], 3)
+
+class TestResponseSizeBands(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/tiny", "statuscode": "200",
+             "length": "512"},
+            {"original": "http://example.com/small", "statuscode": "200",
+             "length": "50000"},
+            {"original": "http://example.com/medium", "statuscode": "200",
+             "length": "500000"},
+            {"original": "http://example.com/huge", "statuscode": "200",
+             "length": "5000000"},
+            {"original": "http://example.com/unknown", "statuscode": "200",
+             "length": "-"},
+            {"original": "http://example.com/tiny", "statuscode": "200",
+             "length": "9999999"},
+        ]
+
+    def test_bands_count_deduped_urls_in_band_order(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["size_bands"],
+                         {"<10KB": 1, "10-100KB": 1, "100KB-1MB": 1,
+                          ">1MB": 1, "?": 1})
+        self.assertEqual(list(buckets["size_bands"]),
+                         ["<10KB", "10-100KB", "100KB-1MB", ">1MB", "?"])
+
+    def test_band_boundaries_are_lower_bound_inclusive(self):
+        buckets = wm.analyze([
+            {"original": "http://example.com/a", "length": "10239"},
+            {"original": "http://example.com/b", "length": "10240"},
+            {"original": "http://example.com/c", "length": "102399"},
+            {"original": "http://example.com/d", "length": "102400"},
+            {"original": "http://example.com/e", "length": "1048575"},
+            {"original": "http://example.com/f", "length": "1048576"},
+        ])
+        self.assertEqual(buckets["size_bands"],
+                         {"<10KB": 1, "10-100KB": 2, "100KB-1MB": 2,
+                          ">1MB": 1})
+
+    def test_duplicate_capture_keeps_first_length(self):
+        # the dup row above carries a huge length, but the URL stays <10KB
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["size_bands"]["<10KB"], 1)
+        self.assertEqual(buckets["size_bands"][">1MB"], 1)
+
+    def test_empty_bands_are_omitted(self):
+        buckets = wm.analyze([
+            {"original": "http://example.com/a", "length": "100"},
+        ])
+        self.assertEqual(buckets["size_bands"], {"<10KB": 1})
+
+    def test_summary_shows_response_sizes_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[=] Response sizes", out)
+        self.assertIn(">1MB", out)
+
+    def test_json_includes_size_bands(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["size_bands"]["10-100KB"], 1)

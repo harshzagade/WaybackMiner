@@ -4,6 +4,13 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Response-size rollup: the text summary now shows a `Response sizes`
+  section (deduped-URL counts per CDX `length` band — <10KB, 10-100KB,
+  100KB-1MB, >1MB, in ascending band order; URLs with no usable length
+  under `?`); the same counts ship in the `--json` report as the
+  `size_bands` key. Counts are computed after the include/exclude/depth
+  filters, like the other rollups, and a duplicate capture keeps its
+  URL's first length, matching the largest-captures handling.
 - Newest-captures view: the text summary now shows a `[+] Newest
   captures` section (top 10 deduped URLs by newest `last_seen`, newest
   first) mirroring the stale-captures view — the pages still being

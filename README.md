@@ -18,6 +18,7 @@ touches the target itself.
 - **Interesting files** — `.php`, `.bak`, `.sql`, `.env`, `.json`, `.git`, …
 - **Duplicate content clusters** — URLs that served the identical response body (same CDX digest), i.e. the same page at many paths
 - **Extension rollup** — archived-URL counts per file extension, so the makeup of the archived surface is visible at a glance
+- **Response-size rollup** — archived-URL counts per CDX length band (<10KB, 10-100KB, 100KB-1MB, >1MB), so the payload-size makeup of the archived surface is visible at a glance
 - **robots.txt drift** (opt-in `--robots-drift`) — archived URLs that the domain's current robots.txt now blocks
 
 ## Install
