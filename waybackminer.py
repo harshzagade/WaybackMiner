@@ -203,6 +203,48 @@ def parse_depth_bound(value):
     return int(value)
 
 
+def parse_min_captures(value):
+    """Parse '--min-captures 3' into a positive int capture count.
+
+    A threshold below 1 would keep every URL (0) or nothing sensible,
+    so it fails fast like the other CLI validations.
+    Raises argparse.ArgumentTypeError on bad input so argparse exits 2
+    with a usage error.
+    """
+    value = value.strip()
+    if not value.isdigit() or int(value) < 1:
+        raise argparse.ArgumentTypeError(
+            f"invalid capture count {value!r}: expected a positive "
+            "integer, e.g. '3'")
+    return int(value)
+
+
+def _passes_prefilters(url, ext, depth, inc, exc, exc_hosts, exc_paths,
+                       min_depth, max_depth):
+    """True if a CDX row passes the pre-bucketing filters.
+
+    Host, path-prefix, depth-range and extension filters, shared by the
+    main bucketing loop and the --min-captures pre-pass so both agree on
+    which rows count (a row that would be filtered out of the buckets
+    must not count toward its URL's capture total either).
+    """
+    entry_host = urllib.parse.urlparse(url).hostname
+    if entry_host and entry_host.lower().rstrip(".") in exc_hosts:
+        return False
+    entry_path = urllib.parse.urlparse(url).path
+    if any(entry_path.startswith(p) for p in exc_paths):
+        return False
+    if min_depth is not None and depth < min_depth:
+        return False
+    if max_depth is not None and depth > max_depth:
+        return False
+    if inc and ext not in inc:
+        return False
+    if ext and ext in exc:
+        return False
+    return True
+
+
 def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
                mimetypes=None, collapse="urlkey", since=None, until=None):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
@@ -335,7 +377,7 @@ def _first_segment(url):
 def analyze(entries, include_exts=None, exclude_exts=None,
             interesting_exts=None, exclude_hosts=None,
             exclude_paths=None, min_depth=None, max_depth=None,
-            robots_disallow=None, robots_allow=None):
+            min_captures=None, robots_disallow=None, robots_allow=None):
     """Split entries into js / params / param_names / interesting / all buckets
     (deduped, sorted), plus a first_seen/last_seen timeline per URL from the
     CDX `timestamp` field (timestamps are zero-padded YYYYMMDDHHMMSS, so
@@ -353,7 +395,17 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     strings ignored), also before bucketing. min_depth/max_depth: keep
     only entries whose path depth (see _url_depth) is within the range,
     also before bucketing, so every mode, rollup, and --json/--csv stays
-    consistent. All default to None, meaning
+    consistent. min_captures: keep only URLs with at least that many CDX
+    rows (captures), so a run focuses on long-lived pages the crawler
+    kept re-visiting. The count is taken over the rows that pass the
+    other pre-bucketing filters above (a filtered-out row never counts
+    toward its URL's total), and the threshold is applied before
+    bucketing, so every mode, rollup, and --json/--csv stays consistent
+    like the other filters. Note the default `--collapse urlkey` yields
+    one row per URL, so the filter only bites with `--collapse digest`,
+    where a re-captured URL returns one row per distinct response body
+    — the same caveat as the `most_captured` view.
+    All default to None, meaning
     no filtering and the built-in interesting set.
 
     The `statuses` bucket maps each HTTP status code to the count of deduped
@@ -474,25 +526,35 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     robots_drift = []
     disallow_patterns = list(robots_disallow or ())
     allow_patterns = list(robots_allow or ())
+    # --min-captures pre-pass: count CDX rows per URL over the rows that
+    # pass the pre-bucketing filters, so the threshold describes the
+    # filtered set (a filtered-out row never counts toward its URL's
+    # total). The main loop below recounts the same rows for kept URLs,
+    # so the most_captured bucket stays identical with or without the
+    # filter.
+    prepass_counts = {}
+    if min_captures is not None:
+        for e in entries:
+            pre_url = e.get("original", "")
+            if not pre_url:
+                continue
+            if not _passes_prefilters(pre_url, _ext(pre_url),
+                                      _url_depth(pre_url), inc, exc,
+                                      exc_hosts, exc_paths,
+                                      min_depth, max_depth):
+                continue
+            prepass_counts[pre_url] = prepass_counts.get(pre_url, 0) + 1
     for e in entries:
         url = e.get("original", "")
         if not url:
             continue
-        entry_host = urllib.parse.urlparse(url).hostname
-        if (entry_host and entry_host.lower().rstrip(".") in exc_hosts):
-            continue
-        entry_path = urllib.parse.urlparse(url).path
-        if any(entry_path.startswith(p) for p in exc_paths):
-            continue
         depth = _url_depth(url)
-        if min_depth is not None and depth < min_depth:
-            continue
-        if max_depth is not None and depth > max_depth:
-            continue
         ext = _ext(url)
-        if inc and ext not in inc:
+        if not _passes_prefilters(url, ext, depth, inc, exc, exc_hosts,
+                                  exc_paths, min_depth, max_depth):
             continue
-        if ext and ext in exc:
+        if (min_captures is not None
+                and prepass_counts.get(url, 0) < min_captures):
             continue
         ts = e.get("timestamp") or None
         if url in seen:
@@ -538,6 +600,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         host = urllib.parse.urlparse(url).hostname
         if host:
             rollup[host] = rollup.get(host, 0) + 1
+            entry_path = urllib.parse.urlparse(url).path
             group = path_groups.setdefault(entry_path, {"hosts": set(),
                                                         "urls": []})
             group["hosts"].add(host.lower())
@@ -826,9 +889,26 @@ def render_csv(buckets, file=None):
         writer.writerow([url, first, last, code, depth])
 
 
+def render_timeline_rows(buckets):
+    """One 'url first_seen last_seen' row per deduped archived URL, in
+    buckets['all'] (sorted) order, for timeline pipelines.
+
+    Timestamps come from buckets['timeline'] and are empty when unknown;
+    trailing empty fields are dropped, so a dateless URL is just its URL
+    instead of a row of trailing spaces.
+    """
+    rows = []
+    for url in buckets["all"]:
+        tl = buckets.get("timeline", {}).get(url, {})
+        first = tl.get("first_seen") or ""
+        last = tl.get("last_seen") or ""
+        rows.append(f"{url} {first} {last}".rstrip())
+    return rows
+
+
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
                json_only=False, subdomains_only=False, csv_only=False,
-               snapshot_links=False):
+               snapshot_links=False, timeline_only=False):
     if json_only:
         print(render_json(buckets))
         return
@@ -839,6 +919,10 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         for u in buckets["all"]:
             last = buckets["timeline"][u]["last_seen"]
             print(snapshot_url(u, last))
+        return
+    if timeline_only:
+        for row in render_timeline_rows(buckets):
+            print(row)
         return
     if js_only:
         for u in buckets["js"]:
@@ -1026,6 +1110,12 @@ def main(argv=None):
                             "for direct archive browsing; combined with "
                             "--output the snapshot URLs are written to the "
                             "file instead")
+    modes.add_argument("--timeline-only", action="store_true",
+                       help="print one 'url first_seen last_seen' row per "
+                            "archived URL (timestamps empty when unknown), "
+                            "sorted by URL, for timeline pipelines; combined "
+                            "with --output the rows are written to the file "
+                            "instead")
     ap.add_argument("--output", "-o", help="write full URL list to file")
     ap.add_argument("--dump-js", dest="dump_js", metavar="FILE",
                     help="write the JavaScript-file URLs bucket to FILE, one "
@@ -1073,6 +1163,17 @@ def main(argv=None):
                          "(e.g. '--max-depth 1' focuses on the shallow "
                          "surface); applied before bucketing so all "
                          "modes and --json/--csv stay consistent")
+    ap.add_argument("--min-captures", dest="min_captures",
+                    type=parse_min_captures, default=None, metavar="N",
+                    help="keep only archived URLs captured at least N "
+                         "times (e.g. '--min-captures 3' focuses on "
+                         "long-lived pages the crawler kept re-visiting); "
+                         "counts CDX rows that pass the other filters, "
+                         "like the most-captured view, and is applied "
+                         "before bucketing so all modes and --json/--csv "
+                         "stay consistent; only bites with "
+                         "'--collapse digest', since the default "
+                         "'urlkey' collapse yields one row per URL")
     ap.add_argument("--interesting-exts", dest="interesting_exts",
                     type=parse_extensions, default=None, metavar="EXTS",
                     help="override the built-in interesting-file extension set, "
@@ -1123,11 +1224,13 @@ def main(argv=None):
                       exclude_hosts=args.exclude_host,
                       exclude_paths=args.exclude_path,
                       min_depth=args.min_depth, max_depth=args.max_depth,
+                      min_captures=args.min_captures,
                       robots_disallow=disallows, robots_allow=allows)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
                  subdomains_only=args.subdomains_only, csv_only=args.csv,
-                 snapshot_links=args.snapshot_links)
+                 snapshot_links=args.snapshot_links,
+                 timeline_only=args.timeline_only)
     for path, items in ((args.dump_js, buckets["js"]),
                         (args.dump_params, buckets["params"])):
         if path is None:
@@ -1148,6 +1251,8 @@ def main(argv=None):
                 fh.write("".join(
                     snapshot_url(u, buckets["timeline"][u]["last_seen"]) + "\n"
                     for u in buckets["all"]))
+            elif args.timeline_only:
+                fh.write("\n".join(render_timeline_rows(buckets)) + "\n")
             else:
                 fh.write("\n".join(buckets["all"]) + "\n")
         print(f"\nwrote {len(buckets['all'])} URLs to {args.output}")

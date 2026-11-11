@@ -2027,3 +2027,176 @@ class TestFirstSegmentRollup(unittest.TestCase):
         buckets = wm.analyze(self._entries())
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["first_segments"]["blog"], 3)
+
+
+class TestMinCaptures(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/b", "statuscode": "200",
+             "timestamp": "20240102000000"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240103000000"},  # dup: 2nd capture of /a
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240104000000"},  # dup: 3rd capture of /a
+            {"original": "http://example.com/b", "statuscode": "200",
+             "timestamp": "20240105000000"},  # dup: 2nd capture of /b
+            {"original": "http://example.com/c", "statuscode": "200",
+             "timestamp": "20240106000000"},
+        ]
+
+    def test_keeps_only_urls_captured_enough_times(self):
+        buckets = wm.analyze(self._entries(), min_captures=2)
+        self.assertEqual(buckets["all"], [
+            "http://example.com/a",
+            "http://example.com/b"])
+
+    def test_threshold_three_keeps_only_most_captured(self):
+        buckets = wm.analyze(self._entries(), min_captures=3)
+        self.assertEqual(buckets["all"], ["http://example.com/a"])
+
+    def test_threshold_one_keeps_everything(self):
+        buckets = wm.analyze(self._entries(), min_captures=1)
+        self.assertEqual(buckets["all"], [
+            "http://example.com/a",
+            "http://example.com/b",
+            "http://example.com/c"])
+
+    def test_threshold_above_max_count_keeps_nothing(self):
+        buckets = wm.analyze(self._entries(), min_captures=4)
+        self.assertEqual(buckets["all"], [])
+
+    def test_rollups_and_most_captured_follow_the_filter(self):
+        buckets = wm.analyze(self._entries(), min_captures=2)
+        self.assertEqual(buckets["most_captured"],
+                         [{"url": "http://example.com/a", "captures": 3},
+                          {"url": "http://example.com/b", "captures": 2}])
+        self.assertEqual(buckets["depths"], {1: 2})
+        self.assertEqual(buckets["timeline"],
+                         {"http://example.com/a":
+                          {"first_seen": "20240101000000",
+                           "last_seen": "20240104000000"},
+                          "http://example.com/b":
+                          {"first_seen": "20240102000000",
+                           "last_seen": "20240105000000"}})
+
+    def test_filtered_rows_do_not_count_toward_the_threshold(self):
+        # /a has 3 rows, but one is under the excluded host, so only 2
+        # count — a threshold of 3 must drop it
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240102000000"},
+            {"original": "http://blog.example.com/a", "statuscode": "200",
+             "timestamp": "20240103000000"},
+        ]
+        buckets = wm.analyze(entries, min_captures=3,
+                             exclude_hosts=["blog.example.com"])
+        self.assertEqual(buckets["all"], [])
+
+    def test_parse_rejects_zero_negative_and_non_numeric(self):
+        for bad in ("0", "-1", "abc", "1.5", ""):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                wm.parse_min_captures(bad)
+
+    def test_parse_accepts_positive_int(self):
+        self.assertEqual(wm.parse_min_captures("3"), 3)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        # SAMPLE_CDX: app.js is the only URL with 2 rows
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--min-captures", "2",
+                          "--js-only"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(),
+                         "http://example.com/app.js")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_rejects_zero(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--min-captures", "0"])
+        self.assertEqual(cm.exception.code, 2)
+
+
+class TestTimelineOnly(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/page", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/page", "statuscode": "200",
+             "timestamp": "20240601000000"},  # dup: newest capture wins
+            {"original": "http://example.com/nodate", "statuscode": "200"},
+            {"original": "http://example.com/app.js", "statuscode": "200",
+             "mimetype": "application/javascript",
+             "timestamp": "20240202000000"},
+        ]
+
+    def test_mode_prints_url_first_last_rows_sorted_by_url(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets, timeline_only=True)
+        self.assertEqual(buf.getvalue().splitlines(), [
+            "http://example.com/app.js 20240202000000 20240202000000",
+            "http://example.com/nodate",
+            "http://example.com/page 20240101000000 20240601000000",
+        ])
+
+    def test_single_capture_shows_same_first_and_last(self):
+        buckets = wm.analyze([{"original": "http://example.com/a",
+                               "statuscode": "200",
+                               "timestamp": "20240101000000"}])
+        self.assertEqual(wm.render_timeline_rows(buckets),
+                         ["http://example.com/a 20240101000000 20240101000000"])
+
+    def test_dateless_url_is_just_the_url(self):
+        buckets = wm.analyze([{"original": "http://example.com/a",
+                               "statuscode": "200"}])
+        self.assertEqual(wm.render_timeline_rows(buckets),
+                         ["http://example.com/a"])
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_mode_conflicts_with_json(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--timeline-only", "--json"])
+        self.assertEqual(cm.exception.code, 2)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--timeline-only"])
+        self.assertEqual(rc, 0)
+        # SAMPLE_CDX dedupes to 5 URLs; app.js was captured twice
+        self.assertEqual(buf.getvalue().splitlines(), [
+            "http://example.com/ 20240101000000 20240101000000",
+            "http://example.com/app.js 20240102000000 20240105000000",
+            "http://example.com/backup.sql 20240104000000 20240104000000",
+            "http://example.com/old.bak 20240106000000 20240106000000",
+            "http://example.com/search?q=test 20240103000000 20240103000000",
+        ])
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_output_writes_timeline_rows(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "timeline.txt")
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--timeline-only",
+                              "-o", path])
+            self.assertEqual(rc, 0)
+            with open(path, encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+            self.assertEqual(len(lines), 5)
+            self.assertIn(
+                "http://example.com/app.js 20240102000000 20240105000000",
+                lines)

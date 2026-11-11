@@ -4,6 +4,23 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--timeline-only` pipeable mode: prints one
+  `url first_seen last_seen` row per archived URL (sorted by URL,
+  from the `timeline` bucket; timestamps empty when unknown, so a
+  dateless URL is just its URL) for timeline pipelines. Mutually
+  exclusive with the other output modes; combined with `--output`,
+  the rows are written to the file instead of stdout.
+- `--min-captures N` filter: keep only archived URLs captured at least N
+  times (e.g. `--min-captures 3` focuses on the long-lived pages the
+  crawler kept re-visiting). The count is taken over CDX rows that pass
+  the other pre-bucketing filters, like the most-captured view, and the
+  threshold is applied before bucketing so every mode, rollup, and
+  `--json`/`--csv` stays consistent. It only bites with
+  `--collapse digest`, since the default `urlkey` collapse yields one
+  row per URL; a threshold below 1 fails fast with argparse exit 2.
+  The pre-bucketing host/path/depth/extension checks are now shared by
+  the bucketing loop and the capture-count pre-pass through a
+  `_passes_prefilters()` helper, so both agree on which rows count.
 - Response-size rollup: the text summary now shows a `Response sizes`
   section (deduped-URL counts per CDX `length` band — <10KB, 10-100KB,
   100KB-1MB, >1MB, in ascending band order; URLs with no usable length

@@ -52,10 +52,12 @@ python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  #
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
 python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only depth 2-3 URLs
+python3 waybackminer.py example.com --min-captures 3 --collapse digest  # keep only URLs captured 3+ times
 python3 waybackminer.py example.com --robots-drift  # archived URLs now blocked by robots.txt
 python3 waybackminer.py example.com --csv           # CSV: url,first_seen,last_seen,statuscode,depth
 python3 waybackminer.py example.com --csv -o out.csv  # write CSV to file
 python3 waybackminer.py example.com --snapshot-links  # Wayback snapshot URL per URL (newest capture)
+python3 waybackminer.py example.com --timeline-only  # one 'url first_seen last_seen' row per URL
 ```
 
 ## Sample run
@@ -108,6 +110,13 @@ use them to focus on the shallow surface or on deep admin trees. A
 `--min-depth` greater than `--max-depth`, or a negative depth, fails fast
 with exit 2.
 
+`--min-captures N` keeps only URLs captured at least N times — the
+long-lived pages the crawler kept re-visiting. It counts CDX rows that pass
+the other filters, like the most-captured view, and is applied before
+bucketing so every mode, rollup, and `--json`/`--csv` stays consistent. It
+only bites with `--collapse digest`, since the default `urlkey` collapse
+yields one row per URL; a threshold below 1 fails fast with exit 2.
+
 It also rolls them up by first-capture year (a `[=] First-seen years`
 section counting deduped URLs per year of first capture, so you can see
 when the archived surface grew); the `--json` report carries the same
@@ -146,7 +155,11 @@ ready seed list for wordlist builders like ParamMiner. With
 `.sql`, `.env`, …), one per line, for piping into downloaders or scanners.
 With `--subdomains-only`, it prints per-subdomain archived-URL counts
 (`host: count`, sorted by count) — a quick read of where the archived
-surface actually lives.
+surface actually lives. With `--timeline-only`, it prints one
+`url first_seen last_seen` row per archived URL (sorted by URL, timestamps
+empty when unknown — a dateless URL is just its URL), for feeding capture
+timelines into other pipelines; combined with `--output`, the rows are
+written to the file instead of stdout.
 
 With `--csv`, the tool prints a CSV report to stdout (header:
 `url,first_seen,last_seen,statuscode,depth`, one row per deduped archived URL
