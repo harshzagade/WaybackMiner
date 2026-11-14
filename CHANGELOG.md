@@ -10,6 +10,10 @@ All notable changes to WaybackMiner are documented here.
   mirroring `--dump-js` / `--dump-params` — independent of the printed
   output mode (so it works alongside `--json`), and an unwritable dump
   path fails fast with exit 2 like the other dump flags.
+- `--dump-newest FILE` per-bucket dump flag: the mirror of `--dump-stale`
+  for the newest-captures bucket — one `url last_seen` row per line,
+  newest first, for the pages still being re-crawled most recently.
+  Both dumps share the new `render_timestamped_rows()` helper.
 - `--timeline-only` pipeable mode: prints one
   `url first_seen last_seen` row per archived URL (sorted by URL,
   from the `timeline` bucket; timestamps empty when unknown, so a

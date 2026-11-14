@@ -1140,6 +1140,11 @@ def main(argv=None):
                          "pipeline gets both the abandoned URL and the date "
                          "of its last capture), independent of the printed "
                          "output mode")
+    ap.add_argument("--dump-newest", dest="dump_newest", metavar="FILE",
+                    help="write the newest-captures bucket to FILE, one "
+                         "'url last_seen' row per line (newest first), "
+                         "mirroring --dump-stale for the pages still being "
+                         "re-crawled most recently")
     ap.add_argument("--ext", type=parse_extensions, default=None,
                     metavar="EXTS",
                     help="comma-separated file extensions to keep, e.g. "
@@ -1249,7 +1254,9 @@ def main(argv=None):
     for path, items in ((args.dump_js, buckets["js"]),
                         (args.dump_params, buckets["params"]),
                         (args.dump_stale,
-                         render_timestamped_rows(buckets["stale"]))):
+                         render_timestamped_rows(buckets["stale"])),
+                        (args.dump_newest,
+                         render_timestamped_rows(buckets["newest"]))):
         if path is None:
             continue
         try:

@@ -1241,6 +1241,34 @@ class TestBucketDumps(unittest.TestCase):
             self.assertIn("could not write", err.getvalue())
 
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_newest_writes_url_and_last_seen_rows(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "newest.txt")
+            self.assertEqual(self._run(["--dump-newest", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                # newest last_seen first — the mirror of the stale dump
+                self.assertEqual(fh.read(),
+                                 "http://example.com/old.bak 20240106000000\n"
+                                 "http://example.com/app.js 20240105000000\n"
+                                 "http://example.com/backup.sql "
+                                 "20240104000000\n"
+                                 "http://example.com/search?q=test "
+                                 "20240103000000\n"
+                                 "http://example.com/ 20240101000000\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_newest_unwritable_path_returns_2(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "missing-dir", "newest.txt")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                rc = self._run(["--dump-newest", bad], tmp)
+            self.assertEqual(rc, 2)
+            self.assertIn("could not write", err.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_dump_unwritable_path_returns_2(self, _):
         import os, tempfile
         with tempfile.TemporaryDirectory() as tmp:
