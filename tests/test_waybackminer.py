@@ -1200,6 +1200,47 @@ class TestBucketDumps(unittest.TestCase):
                 self.assertEqual(fh.read(), "")
 
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_stale_writes_url_and_last_seen_rows(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "stale.txt")
+            self.assertEqual(self._run(["--dump-stale", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                # oldest last_seen first; the dup app.js row advanced its
+                # last_seen to 20240105; the 404 .bak row rides along here
+                # because the mock skips the API's statuscode filter
+                self.assertEqual(fh.read(),
+                                 "http://example.com/ 20240101000000\n"
+                                 "http://example.com/search?q=test "
+                                 "20240103000000\n"
+                                 "http://example.com/backup.sql "
+                                 "20240104000000\n"
+                                 "http://example.com/app.js 20240105000000\n"
+                                 "http://example.com/old.bak 20240106000000\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_stale_works_alongside_json_mode(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "stale.txt")
+            self.assertEqual(self._run(["--json", "--dump-stale", path], tmp),
+                             0)
+            with open(path, encoding="utf-8") as fh:
+                first = fh.readline()
+            self.assertEqual(first, "http://example.com/ 20240101000000\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_stale_unwritable_path_returns_2(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "missing-dir", "stale.txt")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                rc = self._run(["--dump-stale", bad], tmp)
+            self.assertEqual(rc, 2)
+            self.assertIn("could not write", err.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_dump_unwritable_path_returns_2(self, _):
         import os, tempfile
         with tempfile.TemporaryDirectory() as tmp:

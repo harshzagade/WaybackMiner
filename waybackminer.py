@@ -906,6 +906,15 @@ def render_timeline_rows(buckets):
     return rows
 
 
+def render_timestamped_rows(records):
+    """Format url/last_seen records as 'url last_seen' rows, in the given
+    order — the row shape the stale/newest per-bucket dumps write, so a
+    pipeline gets both the URL and the capture date that makes the bucket
+    meaningful (a bare URL list would lose the staleness date).
+    """
+    return [f"{r['url']} {r['last_seen']}" for r in records]
+
+
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
                json_only=False, subdomains_only=False, csv_only=False,
                snapshot_links=False, timeline_only=False):
@@ -1125,6 +1134,12 @@ def main(argv=None):
                     help="write the URLs-with-parameters bucket to FILE, one "
                          "per line (the URLs themselves, not the parameter "
                          "names that --params-only prints)")
+    ap.add_argument("--dump-stale", dest="dump_stale", metavar="FILE",
+                    help="write the stale-captures bucket to FILE, one "
+                         "'url last_seen' row per line (oldest first, so a "
+                         "pipeline gets both the abandoned URL and the date "
+                         "of its last capture), independent of the printed "
+                         "output mode")
     ap.add_argument("--ext", type=parse_extensions, default=None,
                     metavar="EXTS",
                     help="comma-separated file extensions to keep, e.g. "
@@ -1232,7 +1247,9 @@ def main(argv=None):
                  snapshot_links=args.snapshot_links,
                  timeline_only=args.timeline_only)
     for path, items in ((args.dump_js, buckets["js"]),
-                        (args.dump_params, buckets["params"])):
+                        (args.dump_params, buckets["params"]),
+                        (args.dump_stale,
+                         render_timestamped_rows(buckets["stale"]))):
         if path is None:
             continue
         try:

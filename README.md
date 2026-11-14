@@ -49,6 +49,7 @@ python3 waybackminer.py example.com --mimetype image/,application/javascript  # 
 python3 waybackminer.py example.com --collapse digest    # one row per unique response body
 python3 waybackminer.py example.com --since 2020 --until 2024  # mine the 2020-2024 era only
 python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  # per-bucket files for pipelines
+python3 waybackminer.py example.com --dump-stale stale.txt  # stale captures: 'url last_seen' rows, oldest first
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
 python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only depth 2-3 URLs

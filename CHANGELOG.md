@@ -4,6 +4,12 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--dump-stale FILE` per-bucket dump flag: writes the stale-captures
+  bucket to FILE, one `url last_seen` row per line (oldest first, so a
+  pipeline gets both the abandoned URL and the date of its last capture),
+  mirroring `--dump-js` / `--dump-params` — independent of the printed
+  output mode (so it works alongside `--json`), and an unwritable dump
+  path fails fast with exit 2 like the other dump flags.
 - `--timeline-only` pipeable mode: prints one
   `url first_seen last_seen` row per archived URL (sorted by URL,
   from the `timeline` bucket; timestamps empty when unknown, so a
