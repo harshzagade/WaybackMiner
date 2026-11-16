@@ -374,6 +374,17 @@ def _first_segment(url):
     return segments[0] if segments else ""
 
 
+def _canonical_base(url):
+    """Base of an archived URL with the query string and fragment
+    stripped: scheme and host lowercased, path kept as-is (paths are
+    case-sensitive, so '/Search' and '/search' are different bases).
+    Two archived URLs sharing a base differ only by query string.
+    """
+    parts = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), parts.path, "", ""))
+
+
 def analyze(entries, include_exts=None, exclude_exts=None,
             interesting_exts=None, exclude_hosts=None,
             exclude_paths=None, min_depth=None, max_depth=None,
@@ -470,6 +481,14 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     ignored for grouping and hostnames are case-insensitive; a path seen
     under only one host is not a shared path.
 
+    The `canonical_paths` bucket lists archived URLs that differ only
+    by query string, grouped under their shared base (scheme + host +
+    path, host lowercased, path case-sensitive) as base/variants/urls
+    records sorted by variant count desc then base asc — so a
+    parameterized endpoint archived under many query strings surfaces
+    as one row instead of many. Fragments are stripped with the query;
+    a base seen with a single URL is not a cluster.
+
     The `largest_captures` bucket lists the deduped URLs with the
     biggest archived responses (top 10, as url/length records sorted by
     length desc then URL asc) from the CDX `length` field — the
@@ -521,6 +540,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     scheme_counts = {}
     digest_groups = {}
     path_groups = {}
+    canonical_groups = {}
     url_length = {}
     capture_counts = {}
     robots_drift = []
@@ -605,6 +625,9 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                                                         "urls": []})
             group["hosts"].add(host.lower())
             group["urls"].append(url)
+        # canonical grouping: same base (scheme + host + path) under
+        # different query strings is one parameterized endpoint
+        canonical_groups.setdefault(_canonical_base(url), []).append(url)
         if ext == ".js" or e.get("mimetype", "").find("javascript") != -1:
             buckets["js"].append(url)
         query = urllib.parse.urlparse(url).query
@@ -689,6 +712,16 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         for p, g in sorted(path_groups.items(),
                            key=lambda kv: (-len(kv[1]["hosts"]), kv[0]))
         if len(g["hosts"]) >= 2]
+    # canonical paths: archived URLs differing only by query string,
+    # grouped under their shared base as base/variants/urls records,
+    # variant count desc then base asc; a base with one URL is not a
+    # cluster (grouping runs on deduped URLs after the filters, so a
+    # filtered run's clusters describe the filtered set)
+    buckets["canonical_paths"] = [
+        {"base": b, "variants": len(urls), "urls": sorted(urls)}
+        for b, urls in sorted(canonical_groups.items(),
+                              key=lambda kv: (-len(kv[1]), kv[0]))
+        if len(urls) >= 2]
     # robots drift: archived URLs now blocked by the live robots.txt,
     # sorted by URL (drift is computed per deduped URL, so already unique)
     buckets["robots_drift"] = sorted(robots_drift, key=lambda r: r["url"])
@@ -723,7 +756,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                      "first_segments",
                      "largest_captures", "most_captured", "stale",
                      "newest",
-                     "digest_clusters", "robots_drift", "shared_paths"):
+                     "digest_clusters", "robots_drift", "shared_paths",
+                     "canonical_paths"):
             buckets[k].sort()
     return buckets
 
@@ -915,6 +949,15 @@ def render_timestamped_rows(records):
     return [f"{r['url']} {r['last_seen']}" for r in records]
 
 
+def render_drift_rows(records):
+    """Format robots-drift records as 'url pattern' rows, in the given
+    order — the row shape the --dump-drift file writes, so a pipeline
+    gets both the archived URL and the Disallow pattern that now blocks
+    it (a bare URL list would lose which robots rule applies).
+    """
+    return [f"{r['url']} {r['pattern']}" for r in records]
+
+
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
                json_only=False, subdomains_only=False, csv_only=False,
                snapshot_links=False, timeline_only=False):
@@ -1054,6 +1097,15 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         for row in buckets["shared_paths"][:10]:
             print(f"  {row['host_count']:>6} hosts  {row['path']}")
             print(f"           {', '.join(row['hosts'])}")
+    if buckets["canonical_paths"]:
+        print("\n[=] Canonical paths (same base, different query strings, "
+              f"first {min(10, len(buckets['canonical_paths']))}):")
+        for row in buckets["canonical_paths"][:10]:
+            print(f"  {row['variants']:>6}  {row['base']}")
+            for u in row["urls"][:3]:
+                print(f"           {u}")
+            if len(row["urls"]) > 3:
+                print(f"           ... and {len(row['urls']) - 3} more")
     if buckets["robots_drift"]:
         print("\n[!] Now disallowed by robots.txt "
               f"(archived but blocked today, first 20):")
@@ -1145,6 +1197,13 @@ def main(argv=None):
                          "'url last_seen' row per line (newest first), "
                          "mirroring --dump-stale for the pages still being "
                          "re-crawled most recently")
+    ap.add_argument("--dump-drift", dest="dump_drift", metavar="FILE",
+                    help="write the robots-drift bucket to FILE, one "
+                         "'url pattern' row per line (the archived URL and "
+                         "the Disallow pattern that now blocks it), "
+                         "mirroring --dump-stale / --dump-newest; the "
+                         "bucket is empty unless --robots-drift is also "
+                         "given, in which case an empty file is written")
     ap.add_argument("--ext", type=parse_extensions, default=None,
                     metavar="EXTS",
                     help="comma-separated file extensions to keep, e.g. "
@@ -1256,7 +1315,9 @@ def main(argv=None):
                         (args.dump_stale,
                          render_timestamped_rows(buckets["stale"])),
                         (args.dump_newest,
-                         render_timestamped_rows(buckets["newest"]))):
+                         render_timestamped_rows(buckets["newest"])),
+                        (args.dump_drift,
+                         render_drift_rows(buckets["robots_drift"]))):
         if path is None:
             continue
         try:

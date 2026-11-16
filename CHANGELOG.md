@@ -4,6 +4,23 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Canonical-path dedupe view: archived URLs that differ only by query
+  string are grouped under their shared base (scheme + host + path,
+  host lowercased, path case-sensitive) as `base`/`variants`/`urls`
+  records in the new `canonical_paths` bucket (sorted by variant count
+  desc, then base asc; a base with one URL is not a cluster), carried
+  in `--json` output and shown as a `Canonical paths` section in the
+  text summary (top 10 groups, first 3 variant URLs each). Grouping
+  runs on deduped URLs after the filters, so a filtered run's clusters
+  describe the filtered set.
+- `--dump-drift FILE` per-bucket dump flag: writes the robots-drift
+  bucket to FILE, one `url pattern` row per line (the archived URL and
+  the Disallow pattern that now blocks it), mirroring `--dump-stale` /
+  `--dump-newest` — independent of the printed output mode (so it works
+  alongside `--json`), and an unwritable dump path fails fast with
+  exit 2 like the other dump flags. The bucket is empty unless
+  `--robots-drift` is also given, so a run without it writes an empty
+  file. Rows come from the new `render_drift_rows()` helper.
 - `--dump-stale FILE` per-bucket dump flag: writes the stale-captures
   bucket to FILE, one `url last_seen` row per line (oldest first, so a
   pipeline gets both the abandoned URL and the date of its last capture),

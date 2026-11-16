@@ -146,7 +146,7 @@ class TestCli(unittest.TestCase):
                                      "first_segments",
                                      "stale", "newest", "digest_clusters",
                                      "robots_drift", "url_status",
-                                     "shared_paths"})
+                                     "shared_paths", "canonical_paths"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
         self.assertEqual(data["params"], ["http://example.com/search?q=test"])
         self.assertEqual(data["param_names"], ["q"])
@@ -1269,6 +1269,62 @@ class TestBucketDumps(unittest.TestCase):
             self.assertIn("could not write", err.getvalue())
 
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_drift_writes_url_and_pattern_rows(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "drift.txt")
+            # a blanket "/" Disallow blocks every sample URL, so the dump
+            # lists each archived URL with the pattern that blocks it;
+            # the 404 .bak row rides along because the mock skips the
+            # API's statuscode filter
+            with mock.patch("waybackminer.fetch_robots_disallow",
+                            return_value=(["/"], [])):
+                self.assertEqual(self._run(["--robots-drift",
+                                            "--dump-drift", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(),
+                                 "http://example.com/ /\n"
+                                 "http://example.com/app.js /\n"
+                                 "http://example.com/backup.sql /\n"
+                                 "http://example.com/old.bak /\n"
+                                 "http://example.com/search?q=test /\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_drift_empty_bucket_writes_empty_file(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "drift.txt")
+            # no --robots-drift, so the drift bucket is empty — an empty
+            # file, not an error, like the other dump flags
+            self.assertEqual(self._run(["--dump-drift", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_drift_works_alongside_json_mode(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "drift.txt")
+            with mock.patch("waybackminer.fetch_robots_disallow",
+                            return_value=(["/"], [])):
+                self.assertEqual(self._run(["--json", "--robots-drift",
+                                            "--dump-drift", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                first = fh.readline()
+            self.assertEqual(first, "http://example.com/ /\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_drift_unwritable_path_returns_2(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "missing-dir", "drift.txt")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                rc = self._run(["--dump-drift", bad], tmp)
+            self.assertEqual(rc, 2)
+            self.assertIn("could not write", err.getvalue())
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_dump_unwritable_path_returns_2(self, _):
         import os, tempfile
         with tempfile.TemporaryDirectory() as tmp:
@@ -1703,6 +1759,83 @@ class TestSharedPaths(unittest.TestCase):
             wm.print_report(buckets)
         self.assertIn("Shared paths", buf.getvalue())
         self.assertIn("/app/login", buf.getvalue())
+
+
+class TestCanonicalPaths(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/search?q=a", "statuscode": "200"},
+            {"original": "http://example.com/search?q=b", "statuscode": "200"},
+            {"original": "http://example.com/search?q=a&page=2",
+             "statuscode": "200"},
+            {"original": "http://example.com/search", "statuscode": "200"},
+            {"original": "http://EXAMPLE.com/search?q=c", "statuscode": "200"},
+            {"original": "http://example.com/search#frag", "statuscode": "200"},
+            {"original": "http://example.com/SEARCH?q=a", "statuscode": "200"},
+            {"original": "http://example.com/solo", "statuscode": "200"},
+        ]
+
+    def test_query_variants_group_under_one_base(self):
+        buckets = wm.analyze(self._entries())
+        groups = {r["base"]: r for r in buckets["canonical_paths"]}
+        row = groups["http://example.com/search"]
+        self.assertEqual(row["variants"], 6)
+        self.assertEqual(row["urls"], [
+            "http://EXAMPLE.com/search?q=c",
+            "http://example.com/search",
+            "http://example.com/search#frag",
+            "http://example.com/search?q=a",
+            "http://example.com/search?q=a&page=2",
+            "http://example.com/search?q=b"])
+
+    def test_host_case_does_not_split_a_group(self):
+        buckets = wm.analyze(self._entries())
+        bases = [r["base"] for r in buckets["canonical_paths"]]
+        self.assertNotIn("http://EXAMPLE.com/search", bases)
+
+    def test_path_case_does_split_a_group(self):
+        buckets = wm.analyze(self._entries())
+        bases = [r["base"] for r in buckets["canonical_paths"]]
+        self.assertNotIn("http://example.com/SEARCH", bases)
+
+    def test_single_variant_base_is_not_a_cluster(self):
+        buckets = wm.analyze(self._entries())
+        bases = [r["base"] for r in buckets["canonical_paths"]]
+        self.assertNotIn("http://example.com/solo", bases)
+
+    def test_sorted_by_variant_count_then_base(self):
+        entries = [
+            {"original": "http://example.com/a?x=1", "statuscode": "200"},
+            {"original": "http://example.com/a?x=2", "statuscode": "200"},
+            {"original": "http://example.com/b?x=1", "statuscode": "200"},
+            {"original": "http://example.com/b?x=2", "statuscode": "200"},
+            {"original": "http://example.com/b?x=3", "statuscode": "200"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual([r["base"] for r in buckets["canonical_paths"]],
+                         ["http://example.com/b", "http://example.com/a"])
+
+    def test_filtered_urls_do_not_form_clusters(self):
+        # --exclude-path /search drops the query variants before
+        # bucketing, so no canonical group survives the filter
+        buckets = wm.analyze(self._entries(), exclude_paths=["/search"])
+        self.assertEqual(buckets["canonical_paths"], [])
+
+    def test_json_carries_canonical_paths(self):
+        buckets = wm.analyze(self._entries())
+        data = json.loads(wm.render_json(buckets))
+        row = [r for r in data["canonical_paths"]
+               if r["base"] == "http://example.com/search"][0]
+        self.assertEqual(row["variants"], 6)
+
+    def test_summary_shows_canonical_paths_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("Canonical paths", out)
+        self.assertIn("http://example.com/search", out)
 
 
 class TestSchemeRollup(unittest.TestCase):
