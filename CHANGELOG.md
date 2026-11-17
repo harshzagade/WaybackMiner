@@ -4,6 +4,14 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Capture-gap view: the text summary now shows a `Capture gaps`
+  section (top 10 URLs with the longest span between first and last
+  capture, as `url`/`first_seen`/`last_seen`/`gap_days` records in
+  the new `capture_gaps` bucket, sorted by gap desc then URL asc),
+  carried in `--json` output. The gap is whole days between the two
+  timestamps; same-day re-captures (0-day gap) are excluded and URLs
+  with a missing or malformed timestamp are skipped, so the view
+  surfaces dormant pages re-captured years later.
 - `--cdx-filter REGEX` repeatable flag: pass a raw CDX `filter`
   expression through to the API (e.g. `--cdx-filter original:.*\.pdf`),
   sent verbatim as an extra `filter` param, for power-user queries the

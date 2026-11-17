@@ -12,6 +12,7 @@ never touches the target itself.
 """
 import argparse
 import csv
+import datetime
 import json
 import re
 import sys
@@ -490,6 +491,14 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     newest (top 10, as url/last_seen records) — the pages still being
     re-crawled most recently, i.e. the live end of the archived surface.
 
+    The `capture_gaps` bucket lists the deduped URLs with the longest
+    span between first and last capture (top 10, as
+    url/first_seen/last_seen/gap_days records sorted by gap desc then
+    URL asc) — dormant pages re-captured years later, i.e. pages that
+    were forgotten and then came back. Same-day re-captures (a 0-day
+    gap) are excluded, and URLs with a missing or malformed timestamp
+    are skipped — a gap is a date claim, not a data-absence one.
+
     The `digest_clusters` bucket lists groups of two or more deduped URLs
     that share one CDX `digest` (the same response body served at many
     paths), as digest/count/urls records sorted by group size desc then
@@ -723,6 +732,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     # is the newest (top 10), i.e. the pages still being re-crawled
     buckets["newest"] = [{"url": u, "last_seen": ts}
                          for u, ts in newest_captures(buckets["timeline"])]
+    # capture gaps: the URLs with the longest span between first and
+    # last capture (top 10, as url/first_seen/last_seen/gap_days
+    # records) — dormant pages re-captured years later; same-day
+    # re-captures (0-day gap) are excluded, dateless URLs skipped
+    buckets["capture_gaps"] = [
+        {"url": u, "first_seen": first, "last_seen": last, "gap_days": days}
+        for u, first, last, days in capture_gaps(buckets["timeline"])]
     # digest clusters: same response body at two or more deduped URLs,
     # largest groups first, digest asc as the tiebreak
     buckets["digest_clusters"] = [
@@ -784,7 +800,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                      "mimetypes", "schemes", "size_bands",
                      "first_segments",
                      "largest_captures", "most_captured", "stale",
-                     "newest",
+                     "newest", "capture_gaps",
                      "digest_clusters", "robots_drift", "shared_paths",
                      "canonical_paths"):
             buckets[k].sort()
@@ -824,6 +840,44 @@ def newest_captures(timeline, n=10):
              if v.get("last_seen")]
     dated.sort(key=lambda pair: pair[1], reverse=True)
     return dated[:n]
+
+
+def _parse_cdx_timestamp(ts):
+    """Parse a zero-padded YYYYMMDDHHMMSS CDX timestamp, or None.
+
+    CDX timestamps are 14 zero-padded digits; anything else (short,
+    non-numeric, out-of-range) is not a date claim, so it yields None
+    instead of raising — a gap is a date claim, not a data-absence one.
+    """
+    if not isinstance(ts, str) or len(ts) != 14 or not ts.isdigit():
+        return None
+    try:
+        return datetime.datetime.strptime(ts, "%Y%m%d%H%M%S")
+    except ValueError:
+        return None
+
+
+def capture_gaps(timeline, n=10):
+    """Return the (url, first_seen, last_seen, gap_days) records with the
+    longest span between first and last capture, longest first, capped
+    at n. The gap is whole days between the two timestamps (floor), so a
+    URL re-captured on the same day has a 0-day gap and is excluded —
+    the view is about dormant pages re-captured years later, not
+    same-day noise. URLs missing either timestamp, or with a malformed
+    one, are skipped. Ties break by URL asc for a deterministic order.
+    """
+    gaps = []
+    for url, v in timeline.items():
+        first = _parse_cdx_timestamp(v.get("first_seen"))
+        last = _parse_cdx_timestamp(v.get("last_seen"))
+        if first is None or last is None:
+            continue
+        days = (last - first).days
+        if days <= 0:
+            continue
+        gaps.append((url, v["first_seen"], v["last_seen"], days))
+    gaps.sort(key=lambda rec: (-rec[3], rec[0]))
+    return gaps[:n]
 
 
 def _robots_pattern_regex(pattern):
@@ -1039,6 +1093,12 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
               f"first {len(buckets['newest'])}):")
         for row in buckets["newest"]:
             print(f"  {row['last_seen']}  {row['url']}")
+    if buckets["capture_gaps"]:
+        print(f"\n[~] Capture gaps (longest first_seen..last_seen span, "
+              f"top {len(buckets['capture_gaps'])}):")
+        for row in buckets["capture_gaps"]:
+            print(f"  {row['gap_days']:>6}d  "
+                  f"{row['first_seen']}..{row['last_seen']}  {row['url']}")
     if buckets["most_captured"] and buckets["most_captured"][0]["captures"] > 1:
         print(f"\n[=] Most-captured URLs (by CDX rows per URL, "
               f"top {len(buckets['most_captured'])}):")

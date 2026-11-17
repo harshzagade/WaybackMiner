@@ -145,7 +145,8 @@ class TestCli(unittest.TestCase):
                                      "schemes", "largest_captures",
                                      "most_captured", "size_bands",
                                      "first_segments",
-                                     "stale", "newest", "digest_clusters",
+                                     "stale", "newest", "capture_gaps",
+                                     "digest_clusters",
                                      "robots_drift", "url_status",
                                      "shared_paths", "canonical_paths"})
         self.assertEqual(data["js"], ["http://example.com/app.js"])
@@ -1213,6 +1214,114 @@ class TestNewestCaptures(unittest.TestCase):
         parsed = json.loads(wm.render_json(buckets))
         self.assertEqual(parsed["newest"][0]["url"], "http://example.com/new")
         self.assertEqual(parsed["newest"][0]["last_seen"], "20240106000000")
+
+
+class TestCaptureGaps(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/old", "statuscode": "200",
+             "timestamp": "20190601000000"},
+            {"original": "http://example.com/old", "statuscode": "200",
+             "timestamp": "20240101000000"},  # dup: widens the gap
+            {"original": "http://example.com/mid", "statuscode": "200",
+             "timestamp": "20230101000000"},  # single capture: 0-day gap
+            {"original": "http://example.com/new", "statuscode": "200",
+             "timestamp": "20240105000000"},
+            {"original": "http://example.com/new", "statuscode": "200",
+             "timestamp": "20240106000000"},  # dup: 1-day gap
+            {"original": "http://example.com/nodate", "statuscode": "200"},
+            {"original": "http://example.com/sameday", "statuscode": "200",
+             "timestamp": "20200101000000"},
+            {"original": "http://example.com/sameday", "statuscode": "200",
+             "timestamp": "20200101120000"},  # dup same day: 0-day gap
+        ]
+
+    def test_orders_longest_first(self):
+        timeline = {
+            "http://example.com/a": {"first_seen": "20190101000000",
+                                     "last_seen": "20240101000000"},
+            "http://example.com/b": {"first_seen": "20190601000000",
+                                     "last_seen": "20240101000000"},
+            "http://example.com/c": {"first_seen": "20200101000000",
+                                     "last_seen": "20200102000000"}}
+        self.assertEqual(wm.capture_gaps(timeline),
+                         [("http://example.com/a", "20190101000000",
+                           "20240101000000", 1826),
+                          ("http://example.com/b", "20190601000000",
+                           "20240101000000", 1675),
+                          ("http://example.com/c", "20200101000000",
+                           "20200102000000", 1)])
+
+    def test_ties_break_by_url(self):
+        timeline = {
+            "http://example.com/z": {"first_seen": "20200101000000",
+                                     "last_seen": "20200102000000"},
+            "http://example.com/a": {"first_seen": "20200101000000",
+                                     "last_seen": "20200102000000"}}
+        got = wm.capture_gaps(timeline)
+        self.assertEqual([u for u, _, _, _ in got],
+                         ["http://example.com/a", "http://example.com/z"])
+
+    def test_skips_dateless_malformed_and_zero_day_and_caps_at_n(self):
+        timeline = {
+            "http://example.com/nodate": {"first_seen": None,
+                                          "last_seen": None},
+            "http://example.com/short": {"first_seen": "20240101",
+                                         "last_seen": "20240102000000"},
+            "http://example.com/junk": {"first_seen": "not-a-date",
+                                        "last_seen": "20240102000000"},
+            "http://example.com/sameday": {"first_seen": "20200101000000",
+                                           "last_seen": "20200101120000"},
+            "http://example.com/real": {"first_seen": "20190101000000",
+                                        "last_seen": "20240101000000"}}
+        got = wm.capture_gaps(timeline, n=1)
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0][0], "http://example.com/real")
+        self.assertEqual(got[0][3], 1826)
+
+    def test_analyze_capture_gaps_bucket(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["capture_gaps"],
+                         [{"url": "http://example.com/old",
+                           "first_seen": "20190601000000",
+                           "last_seen": "20240101000000",
+                           "gap_days": 1675},
+                          {"url": "http://example.com/new",
+                           "first_seen": "20240105000000",
+                           "last_seen": "20240106000000",
+                           "gap_days": 1}])
+
+    def test_summary_shows_capture_gaps_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[~] Capture gaps (longest first_seen..last_seen "
+                      "span, top 2):", out)
+        self.assertIn("    1675d  20190601000000..20240101000000  "
+                      "http://example.com/old", out)
+
+    def test_summary_hides_section_when_no_positive_gap(self):
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/b", "statuscode": "200",
+             "timestamp": "20240102000000"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual(buckets["capture_gaps"], [])
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        self.assertNotIn("Capture gaps", buf.getvalue())
+
+    def test_json_includes_capture_gaps(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["capture_gaps"][0]["url"],
+                         "http://example.com/old")
+        self.assertEqual(parsed["capture_gaps"][0]["gap_days"], 1675)
 
 
 class TestBucketDumps(unittest.TestCase):

@@ -13,6 +13,7 @@ touches the target itself.
 - **All archived URLs** for a domain (deduped, sorted)
 - **Per-subdomain URL counts** — see where the archived surface actually lives
 - **First-seen / last-seen timestamps** per URL, from the CDX capture history
+- **Capture gaps** — URLs with the longest span between first and last capture (dormant pages re-captured years later)
 - **JavaScript files** — prime recon targets
 - **URLs with query parameters** — injection surface
 - **Interesting files** — `.php`, `.bak`, `.sql`, `.env`, `.json`, `.git`, …
