@@ -4,6 +4,12 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--cdx-filter REGEX` repeatable flag: pass a raw CDX `filter`
+  expression through to the API (e.g. `--cdx-filter original:.*\.pdf`),
+  sent verbatim as an extra `filter` param, for power-user queries the
+  built-in flags cannot express. Multiple expressions are allowed and
+  combine with (AND) the statuscode and mimetype filters. A value
+  without a `field:` prefix fails fast with argparse exit 2.
 - Canonical-path dedupe view: archived URLs that differ only by query
   string are grouped under their shared base (scheme + host + path,
   host lowercased, path case-sensitive) as `base`/`variants`/`urls`

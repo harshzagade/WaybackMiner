@@ -219,6 +219,28 @@ def parse_min_captures(value):
     return int(value)
 
 
+def parse_cdx_filter(value):
+    """Parse '--cdx-filter original:.*\\.pdf' into a raw CDX filter
+    expression, passed through verbatim to the CDX API.
+
+    A CDX filter is '<field>:<expression>' (e.g. 'original:.*\\.pdf',
+    'urlkey:.*login.*'), so the value must be non-empty and contain a
+    colon; anything else is a typo that would silently return nothing,
+    so it fails fast like the other CLI validations. Raises
+    argparse.ArgumentTypeError on bad input so argparse exits 2 with a
+    usage error.
+    """
+    value = value.strip()
+    if not value:
+        raise argparse.ArgumentTypeError(
+            "invalid CDX filter: expected e.g. 'original:.*\\.pdf'")
+    if ":" not in value:
+        raise argparse.ArgumentTypeError(
+            f"invalid CDX filter {value!r}: expected '<field>:<expression>', "
+            "e.g. 'original:.*\\.pdf'")
+    return value
+
+
 def _passes_prefilters(url, ext, depth, inc, exc, exc_hosts, exc_paths,
                        min_depth, max_depth):
     """True if a CDX row passes the pre-bucketing filters.
@@ -246,7 +268,8 @@ def _passes_prefilters(url, ext, depth, inc, exc, exc_hosts, exc_paths,
 
 
 def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
-               mimetypes=None, collapse="urlkey", since=None, until=None):
+               mimetypes=None, collapse="urlkey", since=None, until=None,
+               cdx_filters=None):
     """Fetch archived URLs for domain/* from the CDX API. Returns list of dicts.
 
     statuses: HTTP status codes to include in the CDX filter (default: only
@@ -262,6 +285,10 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
     useful for finding how many distinct page variants were served).
     since/until: optional capture-date bounds ('2020', '202001', '20200115',
     ... up to 'YYYYMMDDHHMMSS') sent as the CDX 'from'/'to' params.
+    cdx_filters: optional list of raw CDX `filter` expressions (e.g.
+    ['original:.*\\.pdf']) sent verbatim as extra `filter` params, for
+    power-user queries the built-in flags cannot express — they combine
+    with (AND) the statuscode/mimetype filters above.
     The CDX `digest` field is also fetched: identical digests across
     different URLs mean the same response body was served at many paths
     (see the `digest_clusters` bucket in analyze()). The CDX `length`
@@ -295,6 +322,8 @@ def fetch_cdx(domain, limit=20000, timeout=120, statuses=(200,),
         if len(alts) > 1:
             expr = f"({expr})"
         params.insert(-1, ("filter", f"mimetype:{expr}"))
+    for raw_filter in (cdx_filters or ()):
+        params.append(("filter", raw_filter))
     url = CDX_URL + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(url, headers={"User-Agent": "WaybackMiner/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -1147,6 +1176,16 @@ def main(argv=None):
                     metavar="DATE",
                     help="only include captures up to this date (same format "
                          "as --since; CDX 'to' param)")
+    ap.add_argument("--cdx-filter", dest="cdx_filter",
+                    action="append", type=parse_cdx_filter,
+                    default=None, metavar="REGEX",
+                    help="repeatable: pass a raw CDX 'filter' expression "
+                         "through to the API, e.g. "
+                         "'--cdx-filter original:.*\\.pdf' (field:regex, "
+                         "sent verbatim as an extra 'filter' param); for "
+                         "power-user queries the built-in flags cannot "
+                         "express — it combines with the statuscode and "
+                         "mimetype filters")
     modes = ap.add_mutually_exclusive_group()
     modes.add_argument("--js-only", action="store_true",
                        help="print only JavaScript file URLs")
@@ -1282,7 +1321,8 @@ def main(argv=None):
                             statuses=args.include_status,
                             mimetypes=args.mimetype,
                             collapse=args.collapse,
-                            since=args.since, until=args.until)
+                            since=args.since, until=args.until,
+                            cdx_filters=args.cdx_filter)
     except Exception as exc:  # noqa: BLE001 - report cleanly for CLI use
         print(f"error: could not query the CDX API: {exc}", file=sys.stderr)
         return 1

@@ -3,6 +3,7 @@ import argparse
 import io
 import json
 import unittest
+import urllib.parse
 from unittest import mock
 
 import waybackminer as wm
@@ -534,6 +535,67 @@ class TestCollapse(unittest.TestCase):
         with mock.patch("sys.stderr", err):
             with self.assertRaises(SystemExit) as cm:
                 wm.main(["example.com", "--collapse", "bogus"])
+        self.assertEqual(cm.exception.code, 2)
+
+
+class TestCdxFilter(unittest.TestCase):
+    def test_parse_keeps_valid_expression(self):
+        self.assertEqual(wm.parse_cdx_filter("original:.*\\.pdf"),
+                         "original:.*\\.pdf")
+
+    def test_parse_strips_surrounding_whitespace(self):
+        self.assertEqual(wm.parse_cdx_filter("  urlkey:.*login.*  "),
+                         "urlkey:.*login.*")
+
+    def test_parse_rejects_empty(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            wm.parse_cdx_filter("   ")
+
+    def test_parse_rejects_missing_colon(self):
+        with self.assertRaises(argparse.ArgumentTypeError):
+            wm.parse_cdx_filter("original")
+
+    def _request_params(self, req):
+        return urllib.parse.parse_qsl(
+            urllib.parse.urlparse(req.full_url).query)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_fetch_sends_raw_filter(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com", cdx_filters=["original:.*\\.pdf"])
+            params = self._request_params(m.call_args[0][0])
+        self.assertIn(("filter", "original:.*\\.pdf"), params)
+        # the built-in statuscode filter is still sent alongside it
+        self.assertIn(("filter", "statuscode:200"), params)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_fetch_sends_multiple_filters(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            wm.fetch_cdx("example.com", cdx_filters=["original:.*\\.pdf",
+                                                     "urlkey:.*login.*"])
+            params = self._request_params(m.call_args[0][0])
+        self.assertIn(("filter", "original:.*\\.pdf"), params)
+        self.assertIn(("filter", "urlkey:.*login.*"), params)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        with mock.patch("urllib.request.urlopen", wraps=_fake_urlopen) as m:
+            buf = io.StringIO()
+            with mock.patch("sys.stdout", buf):
+                rc = wm.main(["example.com", "--cdx-filter",
+                              "original:.*\\.pdf",
+                              "--cdx-filter", "urlkey:.*login.*"])
+            self.assertEqual(rc, 0)
+            params = self._request_params(m.call_args[0][0])
+        self.assertIn(("filter", "original:.*\\.pdf"), params)
+        self.assertIn(("filter", "urlkey:.*login.*"), params)
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_rejects_bad_filter(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--cdx-filter", "nocolon"])
         self.assertEqual(cm.exception.code, 2)
 
 
