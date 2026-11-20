@@ -146,6 +146,7 @@ class TestCli(unittest.TestCase):
                                      "most_captured", "size_bands",
                                      "first_segments",
                                      "stale", "newest", "capture_gaps",
+                                     "status_changes",
                                      "digest_clusters",
                                      "robots_drift", "url_status",
                                      "shared_paths", "canonical_paths"})
@@ -1322,6 +1323,89 @@ class TestCaptureGaps(unittest.TestCase):
         self.assertEqual(parsed["capture_gaps"][0]["url"],
                          "http://example.com/old")
         self.assertEqual(parsed["capture_gaps"][0]["gap_days"], 1675)
+
+
+class TestStatusChanges(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/gone", "statuscode": "200",
+             "timestamp": "20200101000000"},
+            {"original": "http://example.com/gone", "statuscode": "404",
+             "timestamp": "20240101000000"},  # 200 -> 404: removed
+            {"original": "http://example.com/moved", "statuscode": "200",
+             "timestamp": "20200101000000"},
+            {"original": "http://example.com/moved", "statuscode": "301",
+             "timestamp": "20220101000000"},
+            {"original": "http://example.com/moved", "statuscode": "500",
+             "timestamp": "20240101000000"},  # 3 statuses
+            {"original": "http://example.com/stable", "statuscode": "200",
+             "timestamp": "20200101000000"},
+            {"original": "http://example.com/stable", "statuscode": "200",
+             "timestamp": "20240101000000"},  # same code twice: no change
+            {"original": "http://example.com/nocode", "statuscode": "200",
+             "timestamp": "20200101000000"},
+            {"original": "http://example.com/nocode",
+             "timestamp": "20240101000000"},  # missing code -> "?"
+        ]
+
+    def test_analyze_status_changes_bucket(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual(buckets["status_changes"],
+                         [{"url": "http://example.com/moved",
+                           "statuses": ["200", "301", "500"]},
+                          {"url": "http://example.com/gone",
+                           "statuses": ["200", "404"]},
+                          {"url": "http://example.com/nocode",
+                           "statuses": ["200", "?"]}])
+
+    def test_caps_at_ten(self):
+        entries = []
+        for i in range(12):
+            url = f"http://example.com/page{i:02d}"
+            entries.append({"original": url, "statuscode": "200",
+                            "timestamp": "20200101000000"})
+            entries.append({"original": url, "statuscode": "404",
+                            "timestamp": "20240101000000"})
+        buckets = wm.analyze(entries)
+        self.assertEqual(len(buckets["status_changes"]), 10)
+        self.assertEqual(buckets["status_changes"][0]["url"],
+                         "http://example.com/page00")
+        self.assertEqual(buckets["status_changes"][-1]["url"],
+                         "http://example.com/page09")
+
+    def test_summary_shows_status_changes_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("[!] Status changes (captures span multiple status "
+                      "codes, top 3):", out)
+        self.assertIn("  200,301,500  http://example.com/moved", out)
+        self.assertIn("  200,404  http://example.com/gone", out)
+
+    def test_summary_hides_section_when_no_status_change(self):
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240102000000"},
+            {"original": "http://example.com/b", "statuscode": "404",
+             "timestamp": "20240102000000"},
+        ]
+        buckets = wm.analyze(entries)
+        self.assertEqual(buckets["status_changes"], [])
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        self.assertNotIn("Status changes", buf.getvalue())
+
+    def test_json_includes_status_changes(self):
+        buckets = wm.analyze(self._entries())
+        parsed = json.loads(wm.render_json(buckets))
+        self.assertEqual(parsed["status_changes"][0],
+                         {"url": "http://example.com/moved",
+                          "statuses": ["200", "301", "500"]})
 
 
 class TestBucketDumps(unittest.TestCase):

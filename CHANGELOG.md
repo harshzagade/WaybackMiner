@@ -4,6 +4,15 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Status-change view: the text summary now shows a `Status changes`
+  section (top 10 URLs whose captures span two or more HTTP status
+  codes, as `url`/`statuses` records in the new `status_changes`
+  bucket, sorted by status count desc then URL asc, statuses numeric
+  asc with "?" last), carried in `--json` output. It flags pages that
+  flip-flopped over time (200 then 404 = removed, 200 then 301 =
+  moved). Only rows that pass the filters count, and like the
+  most-captured view it only surfaces with `--collapse digest`, since
+  the default `--collapse urlkey` yields one row per URL.
 - Capture-gap view: the text summary now shows a `Capture gaps`
   section (top 10 URLs with the longest span between first and last
   capture, as `url`/`first_seen`/`last_seen`/`gap_days` records in

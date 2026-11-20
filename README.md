@@ -14,6 +14,7 @@ touches the target itself.
 - **Per-subdomain URL counts** — see where the archived surface actually lives
 - **First-seen / last-seen timestamps** per URL, from the CDX capture history
 - **Capture gaps** — URLs with the longest span between first and last capture (dormant pages re-captured years later)
+- **Status changes** — URLs whose captures span two or more HTTP status codes (pages that were removed, moved, or came back)
 - **JavaScript files** — prime recon targets
 - **URLs with query parameters** — injection surface
 - **Interesting files** — `.php`, `.bak`, `.sql`, `.env`, `.json`, `.git`, …
@@ -214,6 +215,15 @@ urlkey` each URL yields a single CDX row, so re-capture counts surface
 when running `--collapse digest`, where a URL re-captured with changed
 content returns one row per distinct response body. Counts are computed
 after the include/exclude/depth filters, like the other rollups.
+
+A `[!] Status changes` section (top 10, status count desc) flags the URLs
+whose captures span two or more status codes — pages that flip-flopped
+over time, e.g. 200 then 404 (removed) or 200 then 301 (moved); the
+`--json` report carries the same records under the `status_changes` key
+as url/statuses records (statuses numeric asc, "?" last for a missing
+statuscode). Like the most-captured view it only surfaces with
+`--collapse digest`, since the default `--collapse urlkey` yields one
+row per URL, and only rows that pass the filters count.
 
 ## Screenshots
 

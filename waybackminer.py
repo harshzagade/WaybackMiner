@@ -499,6 +499,16 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     gap) are excluded, and URLs with a missing or malformed timestamp
     are skipped — a gap is a date claim, not a data-absence one.
 
+    The `status_changes` bucket lists the deduped URLs whose captures
+    span two or more HTTP status codes (top 10, as url/statuses
+    records sorted by status count desc then URL asc) — pages that
+    flip-flopped over time, e.g. 200 then 404 (removed) or 200 then
+    301 (moved). Statuses are sorted numeric asc with "?" (missing
+    statuscode) last. Only rows that pass the include/exclude/depth
+    filters count, so a filtered run's changes describe the filtered
+    set; like `most_captured`, it only bites with `--collapse digest`,
+    since the default `--collapse urlkey` yields one row per URL.
+
     The `digest_clusters` bucket lists groups of two or more deduped URLs
     that share one CDX `digest` (the same response body served at many
     paths), as digest/count/urls records sorted by group size desc then
@@ -571,6 +581,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     rollup = {}
     status_counts = {}
     url_status = {}
+    url_statuses = {}
     depth_counts = {}
     ext_counts = {}
     segment_counts = {}
@@ -618,8 +629,10 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         if url in seen:
             # duplicate capture of a known URL: only the timeline advances
             # (and the per-URL capture count — a repeat CDX row is a
-            # re-capture of the same page)
+            # re-capture of the same page), plus the set of status codes
+            # the URL was ever captured with (the status-change view)
             capture_counts[url] += 1
+            url_statuses[url].add(str(e.get("statuscode") or "?"))
             if ts is not None:
                 if first_seen[url] is None or ts < first_seen[url]:
                     first_seen[url] = ts
@@ -632,6 +645,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         first_seen[url] = last_seen[url] = ts
         code = str(e.get("statuscode") or "?")
         url_status[url] = code
+        url_statuses[url] = {code}
         digest = e.get("digest") or None
         if digest:
             digest_groups.setdefault(digest, []).append(url)
@@ -739,6 +753,17 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["capture_gaps"] = [
         {"url": u, "first_seen": first, "last_seen": last, "gap_days": days}
         for u, first, last, days in capture_gaps(buckets["timeline"])]
+    # status changes: URLs captured with two or more status codes
+    # (top 10, status count desc then URL asc) — pages that were
+    # removed, moved, or came back; statuses numeric asc, "?" last
+    changed = [u for u in url_statuses if len(url_statuses[u]) >= 2]
+    changed.sort(key=lambda u: (-len(url_statuses[u]), u))
+    buckets["status_changes"] = [
+        {"url": u,
+         "statuses": sorted(url_statuses[u],
+                            key=lambda c: (0, int(c)) if c.isdigit()
+                            else (1, c))}
+        for u in changed[:10]]
     # digest clusters: same response body at two or more deduped URLs,
     # largest groups first, digest asc as the tiebreak
     buckets["digest_clusters"] = [
@@ -800,7 +825,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                      "mimetypes", "schemes", "size_bands",
                      "first_segments",
                      "largest_captures", "most_captured", "stale",
-                     "newest", "capture_gaps",
+                     "newest", "capture_gaps", "status_changes",
                      "digest_clusters", "robots_drift", "shared_paths",
                      "canonical_paths"):
             buckets[k].sort()
@@ -1099,6 +1124,11 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
         for row in buckets["capture_gaps"]:
             print(f"  {row['gap_days']:>6}d  "
                   f"{row['first_seen']}..{row['last_seen']}  {row['url']}")
+    if buckets["status_changes"]:
+        print(f"\n[!] Status changes (captures span multiple status codes, "
+              f"top {len(buckets['status_changes'])}):")
+        for row in buckets["status_changes"]:
+            print(f"  {','.join(row['statuses'])}  {row['url']}")
     if buckets["most_captured"] and buckets["most_captured"][0]["captures"] > 1:
         print(f"\n[=] Most-captured URLs (by CDX rows per URL, "
               f"top {len(buckets['most_captured'])}):")
