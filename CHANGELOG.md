@@ -4,6 +4,16 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--only-scheme http|https` filter: keep only archived URLs with one
+  scheme, for focusing on the legacy http-only surface or the current
+  https surface. The scheme check is a new pre-bucketing filter in
+  `_passes_prefilters()` (shared by the main loop and the
+  `--min-captures` pre-pass, so filtered-out rows never count toward a
+  URL's capture total), applied before bucketing so every mode, rollup,
+  and `--json`/`--csv` stays consistent — the `schemes` rollup of a
+  filtered run has a single key. Scheme-less URLs are dropped when a
+  scheme is given, and anything but `http`/`https` fails fast with
+  argparse exit 2 (case-insensitive).
 - Status-change view: the text summary now shows a `Status changes`
   section (top 10 URLs whose captures span two or more HTTP status
   codes, as `url`/`statuses` records in the new `status_changes`

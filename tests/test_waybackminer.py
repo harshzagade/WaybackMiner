@@ -786,6 +786,100 @@ class TestExtCli(unittest.TestCase):
         self.assertEqual(cm.exception.code, 2)
 
 
+class TestOnlyScheme(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "https://example.com/b", "statuscode": "200",
+             "timestamp": "20240102000000"},
+            {"original": "https://example.com/c", "statuscode": "200",
+             "timestamp": "20240103000000"},
+            {"original": "http://example.com/d", "statuscode": "200",
+             "timestamp": "20240104000000"},
+            {"original": "example.com/schemeless", "statuscode": "200",
+             "timestamp": "20240105000000"},
+        ]
+
+    def test_keeps_only_http(self):
+        buckets = wm.analyze(self._entries(), only_scheme="http")
+        self.assertEqual(buckets["all"], [
+            "http://example.com/a",
+            "http://example.com/d"])
+
+    def test_keeps_only_https(self):
+        buckets = wm.analyze(self._entries(), only_scheme="https")
+        self.assertEqual(buckets["all"], [
+            "https://example.com/b",
+            "https://example.com/c"])
+
+    def test_scheme_less_entries_are_dropped_when_filtered(self):
+        # a scheme-less URL has no scheme to match, so it is dropped
+        # under either filter — but kept with no filter
+        self.assertIn("example.com/schemeless",
+                      wm.analyze(self._entries())["all"])
+        self.assertNotIn("example.com/schemeless",
+                         wm.analyze(self._entries(),
+                                    only_scheme="http")["all"])
+        self.assertNotIn("example.com/schemeless",
+                         wm.analyze(self._entries(),
+                                    only_scheme="https")["all"])
+
+    def test_rollups_follow_the_filter(self):
+        buckets = wm.analyze(self._entries(), only_scheme="https")
+        self.assertEqual(buckets["schemes"], {"https": 2})
+        self.assertEqual(buckets["subdomains"], {"example.com": 2})
+        self.assertEqual(buckets["depths"], {1: 2})
+
+    def test_filtered_rows_do_not_count_toward_min_captures(self):
+        # /a has 2 rows, but one is https, so with --only-scheme http
+        # only 1 counts — a threshold of 2 must drop it
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "https://example.com/a", "statuscode": "200",
+             "timestamp": "20240102000000"},
+        ]
+        buckets = wm.analyze(entries, min_captures=2, only_scheme="http")
+        self.assertEqual(buckets["all"], [])
+
+    def test_parse_rejects_anything_but_http_or_https(self):
+        for bad in ("ftp", "http2", "", "http://", "httpss", "HTTPX"):
+            with self.assertRaises(argparse.ArgumentTypeError):
+                wm.parse_only_scheme(bad)
+
+    def test_parse_accepts_both_schemes_case_insensitively(self):
+        self.assertEqual(wm.parse_only_scheme("http"), "http")
+        self.assertEqual(wm.parse_only_scheme("HTTPS"), "https")
+        self.assertEqual(wm.parse_only_scheme(" Http "), "http")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_flag_flows_through(self, _):
+        # SAMPLE_CDX rows are all http, so --only-scheme https keeps
+        # nothing and --only-scheme http keeps everything
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--only-scheme", "https",
+                          "--js-only"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(), "")
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            rc = wm.main(["example.com", "--only-scheme", "http",
+                          "--js-only"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(buf.getvalue().strip(),
+                         "http://example.com/app.js")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_cli_rejects_other_schemes(self, _):
+        err = io.StringIO()
+        with mock.patch("sys.stderr", err):
+            with self.assertRaises(SystemExit) as cm:
+                wm.main(["example.com", "--only-scheme", "ftp"])
+        self.assertEqual(cm.exception.code, 2)
+
+
 if __name__ == "__main__":
     unittest.main()
 

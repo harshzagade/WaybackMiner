@@ -220,6 +220,22 @@ def parse_min_captures(value):
     return int(value)
 
 
+def parse_only_scheme(value):
+    """Parse '--only-scheme https' into a normalized scheme string.
+
+    Only 'http' and 'https' make sense for archived URLs; anything else
+    is a typo that would silently return nothing, so it fails fast like
+    the other CLI validations. Case-insensitive.
+    Raises argparse.ArgumentTypeError on bad input so argparse exits 2
+    with a usage error.
+    """
+    scheme = value.strip().lower()
+    if scheme not in ("http", "https"):
+        raise argparse.ArgumentTypeError(
+            f"invalid scheme {value!r}: expected 'http' or 'https'")
+    return scheme
+
+
 def parse_cdx_filter(value):
     """Parse '--cdx-filter original:.*\\.pdf' into a raw CDX filter
     expression, passed through verbatim to the CDX API.
@@ -243,14 +259,17 @@ def parse_cdx_filter(value):
 
 
 def _passes_prefilters(url, ext, depth, inc, exc, exc_hosts, exc_paths,
-                       min_depth, max_depth):
+                       min_depth, max_depth, only_scheme=None):
     """True if a CDX row passes the pre-bucketing filters.
 
-    Host, path-prefix, depth-range and extension filters, shared by the
+    Host, path-prefix, depth-range, scheme and extension filters, shared by the
     main bucketing loop and the --min-captures pre-pass so both agree on
     which rows count (a row that would be filtered out of the buckets
     must not count toward its URL's capture total either).
     """
+    if only_scheme is not None:
+        if urllib.parse.urlparse(url).scheme.lower() != only_scheme:
+            return False
     entry_host = urllib.parse.urlparse(url).hostname
     if entry_host and entry_host.lower().rstrip(".") in exc_hosts:
         return False
@@ -418,7 +437,8 @@ def _canonical_base(url):
 def analyze(entries, include_exts=None, exclude_exts=None,
             interesting_exts=None, exclude_hosts=None,
             exclude_paths=None, min_depth=None, max_depth=None,
-            min_captures=None, robots_disallow=None, robots_allow=None):
+            min_captures=None, robots_disallow=None, robots_allow=None,
+            only_scheme=None):
     """Split entries into js / params / param_names / interesting / all buckets
     (deduped, sorted), plus a first_seen/last_seen timeline per URL from the
     CDX `timestamp` field (timestamps are zero-padded YYYYMMDDHHMMSS, so
@@ -446,6 +466,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     one row per URL, so the filter only bites with `--collapse digest`,
     where a re-captured URL returns one row per distinct response body
     — the same caveat as the `most_captured` view.
+    only_scheme: keep only entries whose URL scheme is this value
+    ('http' or 'https'), so a run focuses on the legacy http-only
+    surface or the current https surface. Scheme-less entries have no
+    scheme to match, so they are dropped when a scheme is given.
+    Applied before bucketing, like the other filters, so every mode,
+    rollup, and --json/--csv stays consistent; the `schemes` rollup of
+    a filtered run has a single key.
     All default to None, meaning
     no filtering and the built-in interesting set.
 
@@ -610,7 +637,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
             if not _passes_prefilters(pre_url, _ext(pre_url),
                                       _url_depth(pre_url), inc, exc,
                                       exc_hosts, exc_paths,
-                                      min_depth, max_depth):
+                                      min_depth, max_depth,
+                                      only_scheme=only_scheme):
                 continue
             prepass_counts[pre_url] = prepass_counts.get(pre_url, 0) + 1
     for e in entries:
@@ -620,7 +648,8 @@ def analyze(entries, include_exts=None, exclude_exts=None,
         depth = _url_depth(url)
         ext = _ext(url)
         if not _passes_prefilters(url, ext, depth, inc, exc, exc_hosts,
-                                  exc_paths, min_depth, max_depth):
+                                  exc_paths, min_depth, max_depth,
+                                  only_scheme=only_scheme):
             continue
         if (min_captures is not None
                 and prepass_counts.get(url, 0) < min_captures):
@@ -1382,6 +1411,14 @@ def main(argv=None):
                          "stay consistent; only bites with "
                          "'--collapse digest', since the default "
                          "'urlkey' collapse yields one row per URL")
+    ap.add_argument("--only-scheme", dest="only_scheme",
+                    type=parse_only_scheme, default=None, metavar="SCHEME",
+                    help="keep only archived URLs with this scheme, 'http' "
+                         "or 'https' (e.g. '--only-scheme http' focuses on "
+                         "the legacy http-only surface, '--only-scheme "
+                         "https' on the current surface); applied before "
+                         "bucketing so all modes and --json/--csv stay "
+                         "consistent; anything else fails fast with exit 2")
     ap.add_argument("--interesting-exts", dest="interesting_exts",
                     type=parse_extensions, default=None, metavar="EXTS",
                     help="override the built-in interesting-file extension set, "
@@ -1434,7 +1471,8 @@ def main(argv=None):
                       exclude_paths=args.exclude_path,
                       min_depth=args.min_depth, max_depth=args.max_depth,
                       min_captures=args.min_captures,
-                      robots_disallow=disallows, robots_allow=allows)
+                      robots_disallow=disallows, robots_allow=allows,
+                      only_scheme=args.only_scheme)
     print_report(buckets, js_only=args.js_only, params_only=args.params_only,
                  interesting_only=args.interesting_only, json_only=args.json,
                  subdomains_only=args.subdomains_only, csv_only=args.csv,

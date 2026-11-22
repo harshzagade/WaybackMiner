@@ -60,6 +60,7 @@ python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one 
 python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
 python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only depth 2-3 URLs
 python3 waybackminer.py example.com --min-captures 3 --collapse digest  # keep only URLs captured 3+ times
+python3 waybackminer.py example.com --only-scheme http  # keep only http captures (the legacy surface)
 python3 waybackminer.py example.com --robots-drift  # archived URLs now blocked by robots.txt
 python3 waybackminer.py example.com --csv           # CSV: url,first_seen,last_seen,statuscode,depth
 python3 waybackminer.py example.com --csv -o out.csv  # write CSV to file
@@ -123,6 +124,14 @@ the other filters, like the most-captured view, and is applied before
 bucketing so every mode, rollup, and `--json`/`--csv` stays consistent. It
 only bites with `--collapse digest`, since the default `urlkey` collapse
 yields one row per URL; a threshold below 1 fails fast with exit 2.
+
+`--only-scheme http|https` keeps only URLs with that scheme —
+`--only-scheme http` focuses on the legacy http-only surface,
+`--only-scheme https` on the current surface. It is applied before
+bucketing so every mode, rollup, and `--json`/`--csv` stays consistent
+(the `schemes` rollup of a filtered run has a single key); scheme-less
+URLs are dropped when a scheme is given, and anything but `http` or
+`https` fails fast with exit 2.
 
 It also rolls them up by first-capture year (a `[=] First-seen years`
 section counting deduped URLs per year of first capture, so you can see
