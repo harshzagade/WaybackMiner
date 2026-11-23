@@ -150,6 +150,11 @@ such as large dumps stand out; the `--json` report carries the same
 records under the `largest_captures` key. Captures with no usable length
 are skipped.
 
+It also lists the longest archived URLs (a `[=] Longest URLs` section,
+top 10 by character length, length desc) so deep parameterized URLs
+stand out; the `--json` report carries the same records under the
+`longest_urls` key.
+
 It also rolls them up by URL scheme (a `[=] Schemes` section, count desc)
 so a legacy http-only slice of the archived surface stands out against
 the https majority; the `--json` report carries the same counts under

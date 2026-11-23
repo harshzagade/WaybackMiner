@@ -143,6 +143,7 @@ class TestCli(unittest.TestCase):
                                      "statuses", "depths", "years", "mimetypes",
                                      "extensions",
                                      "schemes", "largest_captures",
+                                     "longest_urls",
                                      "most_captured", "size_bands",
                                      "first_segments",
                                      "stale", "newest", "capture_gaps",
@@ -2285,6 +2286,55 @@ class TestLargestCaptures(unittest.TestCase):
             wm.fetch_cdx("example.com")
             req = m.call_args[0][0]
             self.assertIn("length", req.full_url)
+
+
+class TestLongestUrls(unittest.TestCase):
+    def _entries(self):
+        return [
+            {"original": "http://example.com/short", "statuscode": "200"},
+            {"original": "http://example.com/a/very/long/path?x=1&y=2&z=3",
+             "statuscode": "200"},
+            {"original": "http://example.com/medium-length-path",
+             "statuscode": "200"},
+            {"original": "http://example.com/a/very/long/path?x=1&y=2&z=3",
+             "statuscode": "200"},  # dup URL: counted once
+        ]
+
+    def test_sorted_by_length_desc(self):
+        buckets = wm.analyze(self._entries())
+        self.assertEqual([(r["url"], r["length"])
+                          for r in buckets["longest_urls"]],
+                         [("http://example.com/a/very/long/path?x=1&y=2&z=3",
+                           47),
+                          ("http://example.com/medium-length-path", 37),
+                          ("http://example.com/short", 24)])
+
+    def test_top_ten_cap_and_url_tiebreak(self):
+        entries = [{"original": f"http://example.com/f{i:02d}",
+                    "statuscode": "200"}
+                   for i in range(12)]
+        buckets = wm.analyze(entries)
+        self.assertEqual(len(buckets["longest_urls"]), 10)
+        self.assertEqual(buckets["longest_urls"][0]["url"],
+                         "http://example.com/f00")
+
+    def test_summary_shows_longest_section(self):
+        buckets = wm.analyze(self._entries())
+        buf = io.StringIO()
+        with mock.patch("sys.stdout", buf):
+            wm.print_report(buckets)
+        out = buf.getvalue()
+        self.assertIn("Longest URLs", out)
+        self.assertIn("http://example.com/a/very/long/path?x=1&y=2&z=3",
+                      out)
+
+    def test_json_carries_longest_urls(self):
+        buckets = wm.analyze(self._entries())
+        data = json.loads(wm.render_json(buckets))
+        self.assertEqual(data["longest_urls"][0],
+                         {"url": "http://example.com/a/very/long/path"
+                                 "?x=1&y=2&z=3",
+                          "length": 47})
 
 
 class TestMostCaptured(unittest.TestCase):

@@ -4,6 +4,14 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- Longest-URL view: the text summary now shows a `Longest URLs`
+  section (top 10 archived URLs by character length, as `url`/`length`
+  records in the new `longest_urls` bucket, sorted by length desc then
+  URL asc), carried in `--json` output. Deep parameterized URLs stand
+  out — long search/filter URLs with many query parameters. The length
+  is the full URL string's character count, computed on deduped URLs
+  after the filters, so a filtered run's longest URLs describe the
+  filtered set.
 - `--only-scheme http|https` filter: keep only archived URLs with one
   scheme, for focusing on the legacy http-only surface or the current
   https surface. The scheme check is a new pre-bucketing filter in

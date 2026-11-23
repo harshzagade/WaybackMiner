@@ -572,6 +572,14 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     skipped, and a duplicate capture does not change its URL's length:
     the first entry's length wins, matching the digest handling.
 
+    The `longest_urls` bucket lists the deduped URLs with the longest
+    character length (top 10, as url/length records sorted by length
+    desc then URL asc) — deep parameterized URLs stand out, e.g. long
+    search/filter URLs with many query parameters. Length is the full
+    URL string's character count, computed on deduped URLs after the
+    filters, so a filtered run's longest URLs describe the filtered
+    set.
+
     The `most_captured` bucket lists the deduped URLs with the most
     CDX rows (top 10, as url/captures records sorted by capture count
     desc then URL asc) — the pages the Wayback crawler re-captured
@@ -829,6 +837,13 @@ def analyze(entries, include_exts=None, exclude_exts=None,
     buckets["largest_captures"] = [
         {"url": u, "length": url_length[u]}
         for u in sorted(url_length, key=lambda u: (-url_length[u], u))[:10]]
+    # longest URLs: longest archived URLs by character length (top 10),
+    # length desc then URL asc as the tiebreak; computed on deduped URLs
+    # after the filters, so a filtered run's longest URLs describe the
+    # filtered set — deep parameterized URLs stand out
+    buckets["longest_urls"] = [
+        {"url": u, "length": len(u)}
+        for u in sorted(buckets["all"], key=lambda u: (-len(u), u))[:10]]
     # most-captured URLs: most CDX rows first (top 10), capture count
     # desc then URL asc as the tiebreak — the pages re-captured most
     buckets["most_captured"] = [
@@ -853,7 +868,7 @@ def analyze(entries, include_exts=None, exclude_exts=None,
                      "statuses", "depths", "years", "extensions",
                      "mimetypes", "schemes", "size_bands",
                      "first_segments",
-                     "largest_captures", "most_captured", "stale",
+                     "largest_captures", "longest_urls", "most_captured", "stale",
                      "newest", "capture_gaps", "status_changes",
                      "digest_clusters", "robots_drift", "shared_paths",
                      "canonical_paths"):
@@ -1227,6 +1242,11 @@ def print_report(buckets, js_only=False, params_only=False, interesting_only=Fal
               f"top {len(buckets['largest_captures'])}):")
         for row in buckets["largest_captures"]:
             print(f"  {row['length']:>10}  {row['url']}")
+    if buckets["longest_urls"]:
+        print("\n[=] Longest URLs (by character length, "
+              f"top {len(buckets['longest_urls'])}):")
+        for row in buckets["longest_urls"]:
+            print(f"  {row['length']:>6}  {row['url']}")
     if buckets["size_bands"]:
         print("\n[=] Response sizes (deduped URLs per CDX length band):")
         for band, count in buckets["size_bands"].items():
