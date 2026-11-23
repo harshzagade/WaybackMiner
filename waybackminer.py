@@ -1110,6 +1110,16 @@ def render_drift_rows(records):
     return [f"{r['url']} {r['pattern']}" for r in records]
 
 
+def render_shared_rows(records):
+    """Format shared-paths records as 'path host_count host1,host2' rows,
+    in the given order — the row shape the --dump-shared file writes, so
+    a pipeline gets the path, how many hosts serve it, and which hosts
+    (a bare path list would lose the mirror/staging detail).
+    """
+    return [f"{r['path']} {r['host_count']} {','.join(r['hosts'])}"
+            for r in records]
+
+
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
                json_only=False, subdomains_only=False, csv_only=False,
                snapshot_links=False, timeline_only=False):
@@ -1382,6 +1392,15 @@ def main(argv=None):
                          "mirroring --dump-stale / --dump-newest; the "
                          "bucket is empty unless --robots-drift is also "
                          "given, in which case an empty file is written")
+    ap.add_argument("--dump-shared", dest="dump_shared", metavar="FILE",
+                    help="write the shared-paths bucket to FILE, one "
+                         "'path host_count host1,host2' row per line (the "
+                         "path, how many hosts serve it, and which hosts), "
+                         "mirroring --dump-stale / --dump-newest / "
+                         "--dump-drift, for mirror/staging triage; the "
+                         "bucket is empty when no path is served under two "
+                         "or more hosts, in which case an empty file is "
+                         "written")
     ap.add_argument("--ext", type=parse_extensions, default=None,
                     metavar="EXTS",
                     help="comma-separated file extensions to keep, e.g. "
@@ -1505,7 +1524,9 @@ def main(argv=None):
                         (args.dump_newest,
                          render_timestamped_rows(buckets["newest"])),
                         (args.dump_drift,
-                         render_drift_rows(buckets["robots_drift"]))):
+                         render_drift_rows(buckets["robots_drift"])),
+                        (args.dump_shared,
+                         render_shared_rows(buckets["shared_paths"]))):
         if path is None:
             continue
         try:

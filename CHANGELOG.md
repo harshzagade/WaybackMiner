@@ -4,6 +4,15 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--dump-shared FILE` per-bucket dump flag: writes the shared-paths
+  bucket to FILE, one `path host_count host1,host2` row per line (the
+  path, how many hosts serve it, and which hosts), mirroring
+  `--dump-stale` / `--dump-newest` / `--dump-drift` — independent of
+  the printed output mode (so it works alongside `--json`), and an
+  unwritable dump path fails fast with exit 2 like the other dump
+  flags. The bucket is empty when no path is served under two or more
+  hosts, so such a run writes an empty file. Rows come from the new
+  `render_shared_rows()` helper.
 - Longest-URL view: the text summary now shows a `Longest URLs`
   section (top 10 archived URLs by character length, as `url`/`length`
   records in the new `longest_urls` bucket, sorted by length desc then

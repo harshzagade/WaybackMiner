@@ -56,6 +56,7 @@ python3 waybackminer.py example.com --dump-js js.txt --dump-params params.txt  #
 python3 waybackminer.py example.com --dump-stale stale.txt  # stale captures: 'url last_seen' rows, oldest first
 python3 waybackminer.py example.com --dump-newest newest.txt  # newest captures: 'url last_seen' rows, newest first
 python3 waybackminer.py example.com --robots-drift --dump-drift drift.txt  # robots drift: 'url pattern' rows
+python3 waybackminer.py example.com --dump-shared shared.txt  # shared paths: 'path host_count host1,host2' rows
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
 python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only depth 2-3 URLs
@@ -166,7 +167,10 @@ section, host count desc — mirrors and staging copies of the same path);
 the `--json` report carries them under the `shared_paths` key as
 path/host_count/hosts/urls records. Query strings are ignored for
 grouping and hostnames are case-insensitive, so `/app/login` on
-`example.com` and `staging.example.com` is one shared path.
+`example.com` and `staging.example.com` is one shared path. The
+`--dump-shared FILE` flag writes the same records as
+`path host_count host1,host2` rows, one per line, for mirror/staging
+triage.
 
 With `--js-only`, the tool prints just the JS URL list (one per line) so you
 can pipe it straight into other tools. With `--params-only`, it prints the

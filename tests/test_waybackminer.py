@@ -1674,6 +1674,84 @@ class TestBucketDumps(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("could not write", err.getvalue())
 
+    def test_render_shared_rows_formats_path_count_and_hosts(self):
+        records = [
+            {"path": "/app/login", "host_count": 2,
+             "hosts": ["example.com", "staging.example.com"],
+             "urls": ["http://example.com/app/login",
+                      "http://staging.example.com/app/login"]},
+            {"path": "/only-here", "host_count": 3,
+             "hosts": ["a.example.com", "b.example.com",
+                       "example.com"],
+             "urls": []},
+        ]
+        self.assertEqual(wm.render_shared_rows(records),
+                         ["/app/login 2 example.com,staging.example.com",
+                          "/only-here 3 a.example.com,b.example.com,"
+                          "example.com"])
+
+    def test_dump_shared_writes_path_count_and_host_rows(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/app/login",
+             "statuscode": "200"},
+            {"original": "http://staging.example.com/app/login",
+             "statuscode": "200"},
+            {"original": "http://example.com/solo", "statuscode": "200"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shared.txt")
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--dump-shared", path], tmp),
+                                 0)
+            with open(path, encoding="utf-8") as fh:
+                # only /app/login is shared (2 hosts); /solo is not
+                self.assertEqual(
+                    fh.read(),
+                    "/app/login 2 example.com,staging.example.com\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_shared_empty_bucket_writes_empty_file(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shared.txt")
+            # the SAMPLE_CDX fixture has a single host, so no path is
+            # shared — an empty file, not an error, like the other dumps
+            self.assertEqual(self._run(["--dump-shared", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "")
+
+    def test_dump_shared_works_alongside_json_mode(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/app/login",
+             "statuscode": "200"},
+            {"original": "http://staging.example.com/app/login",
+             "statuscode": "200"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "shared.txt")
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--json", "--dump-shared",
+                                            path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                first = fh.readline()
+            self.assertEqual(
+                first, "/app/login 2 example.com,staging.example.com\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_shared_unwritable_path_returns_2(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "missing-dir", "shared.txt")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                rc = self._run(["--dump-shared", bad], tmp)
+            self.assertEqual(rc, 2)
+            self.assertIn("could not write", err.getvalue())
+
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_dump_unwritable_path_returns_2(self, _):
         import os, tempfile
