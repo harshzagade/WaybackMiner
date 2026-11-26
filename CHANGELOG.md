@@ -4,6 +4,15 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--dump-longest FILE` per-bucket dump flag: writes the longest-URLs
+  bucket to FILE, one `url length` row per line (the URL and its
+  character length, longest first), mirroring `--dump-stale` /
+  `--dump-newest` / `--dump-drift` / `--dump-shared` — independent of
+  the printed output mode (so it works alongside `--json`), and an
+  unwritable dump path fails fast with exit 2 like the other dump
+  flags. The bucket holds at most 10 rows, so a run with no archived
+  URLs writes an empty file. Rows come from the new
+  `render_longest_rows()` helper.
 - `--dump-shared FILE` per-bucket dump flag: writes the shared-paths
   bucket to FILE, one `path host_count host1,host2` row per line (the
   path, how many hosts serve it, and which hosts), mirroring

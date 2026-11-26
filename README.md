@@ -57,6 +57,7 @@ python3 waybackminer.py example.com --dump-stale stale.txt  # stale captures: 'u
 python3 waybackminer.py example.com --dump-newest newest.txt  # newest captures: 'url last_seen' rows, newest first
 python3 waybackminer.py example.com --robots-drift --dump-drift drift.txt  # robots drift: 'url pattern' rows
 python3 waybackminer.py example.com --dump-shared shared.txt  # shared paths: 'path host_count host1,host2' rows
+python3 waybackminer.py example.com --dump-longest longest.txt  # longest URLs: 'url length' rows, longest first
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
 python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only depth 2-3 URLs
@@ -154,7 +155,9 @@ are skipped.
 It also lists the longest archived URLs (a `[=] Longest URLs` section,
 top 10 by character length, length desc) so deep parameterized URLs
 stand out; the `--json` report carries the same records under the
-`longest_urls` key.
+`longest_urls` key. The `--dump-longest FILE` flag writes the same
+records as `url length` rows, one per line, longest first, for
+long-parameterized-URL triage.
 
 It also rolls them up by URL scheme (a `[=] Schemes` section, count desc)
 so a legacy http-only slice of the archived surface stands out against

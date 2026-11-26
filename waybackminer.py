@@ -1120,6 +1120,15 @@ def render_shared_rows(records):
             for r in records]
 
 
+def render_longest_rows(records):
+    """Format longest-URL records as 'url length' rows, in the given
+    order — the row shape the --dump-longest file writes, so a pipeline
+    gets both the URL and its character length (a bare URL list would
+    lose the ranking that makes the bucket useful for triage).
+    """
+    return [f"{r['url']} {r['length']}" for r in records]
+
+
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
                json_only=False, subdomains_only=False, csv_only=False,
                snapshot_links=False, timeline_only=False):
@@ -1401,6 +1410,14 @@ def main(argv=None):
                          "bucket is empty when no path is served under two "
                          "or more hosts, in which case an empty file is "
                          "written")
+    ap.add_argument("--dump-longest", dest="dump_longest", metavar="FILE",
+                    help="write the longest-URLs bucket to FILE, one "
+                         "'url length' row per line (the URL and its "
+                         "character length, longest first), mirroring "
+                         "--dump-stale / --dump-newest / --dump-drift / "
+                         "--dump-shared, for long-parameterized-URL triage; "
+                         "the bucket holds at most 10 rows, and an empty "
+                         "archived set writes an empty file")
     ap.add_argument("--ext", type=parse_extensions, default=None,
                     metavar="EXTS",
                     help="comma-separated file extensions to keep, e.g. "
@@ -1526,7 +1543,9 @@ def main(argv=None):
                         (args.dump_drift,
                          render_drift_rows(buckets["robots_drift"])),
                         (args.dump_shared,
-                         render_shared_rows(buckets["shared_paths"]))):
+                         render_shared_rows(buckets["shared_paths"])),
+                        (args.dump_longest,
+                         render_longest_rows(buckets["longest_urls"]))):
         if path is None:
             continue
         try:

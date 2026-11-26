@@ -1752,6 +1752,67 @@ class TestBucketDumps(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("could not write", err.getvalue())
 
+    def test_render_longest_rows_formats_url_and_length(self):
+        records = [
+            {"url": "http://example.com/search?q=test&lang=en", "length": 40},
+            {"url": "http://example.com/app.js", "length": 25},
+        ]
+        self.assertEqual(wm.render_longest_rows(records),
+                         ["http://example.com/search?q=test&lang=en 40",
+                          "http://example.com/app.js 25"])
+
+    def test_dump_longest_writes_url_length_rows_longest_first(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200"},
+            {"original": "http://example.com/search?q=test&lang=en",
+             "statuscode": "200"},
+            {"original": "http://example.com/app.js", "statuscode": "200"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "longest.txt")
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--dump-longest", path], tmp),
+                                 0)
+            with open(path, encoding="utf-8") as fh:
+                # longest first: the parameterized search URL (40 chars),
+                # then app.js (25), then /a (20)
+                self.assertEqual(
+                    fh.read(),
+                    "http://example.com/search?q=test&lang=en 40\n"
+                    "http://example.com/app.js 25\n"
+                    "http://example.com/a 20\n")
+
+    def test_dump_longest_works_alongside_json_mode(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/search?q=test",
+             "statuscode": "200"},
+            {"original": "http://example.com/a", "statuscode": "200"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "longest.txt")
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--json", "--dump-longest",
+                                            path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                first = fh.readline()
+            self.assertEqual(
+                first, "http://example.com/search?q=test 32\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_longest_unwritable_path_returns_2(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "missing-dir", "longest.txt")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                rc = self._run(["--dump-longest", bad], tmp)
+            self.assertEqual(rc, 2)
+            self.assertIn("could not write", err.getvalue())
+
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_dump_unwritable_path_returns_2(self, _):
         import os, tempfile
