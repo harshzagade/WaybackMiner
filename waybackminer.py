@@ -1129,6 +1129,17 @@ def render_longest_rows(records):
     return [f"{r['url']} {r['length']}" for r in records]
 
 
+def render_canonical_rows(records):
+    """Format canonical-paths records as 'base variants url1,url2' rows,
+    in the given order — the row shape the --dump-canonical file writes,
+    so a pipeline gets the base path, how many query-string variants it
+    has, and the variant URLs themselves (a bare base list would lose
+    which parameterized URLs make up the cluster).
+    """
+    return [f"{r['base']} {r['variants']} {','.join(r['urls'])}"
+            for r in records]
+
+
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
                json_only=False, subdomains_only=False, csv_only=False,
                snapshot_links=False, timeline_only=False):
@@ -1418,6 +1429,17 @@ def main(argv=None):
                          "--dump-shared, for long-parameterized-URL triage; "
                          "the bucket holds at most 10 rows, and an empty "
                          "archived set writes an empty file")
+    ap.add_argument("--dump-canonical", dest="dump_canonical",
+                    metavar="FILE",
+                    help="write the canonical-paths bucket to FILE, one "
+                         "'base variants url1,url2' row per line (the base "
+                         "path, how many query-string variants it has, and "
+                         "the variant URLs, variant-count desc), mirroring "
+                         "--dump-stale / --dump-newest / --dump-drift / "
+                         "--dump-shared / --dump-longest, for "
+                         "parameterized-URL cluster triage; the bucket is "
+                         "empty when no base has two or more variants, in "
+                         "which case an empty file is written")
     ap.add_argument("--ext", type=parse_extensions, default=None,
                     metavar="EXTS",
                     help="comma-separated file extensions to keep, e.g. "
@@ -1545,7 +1567,10 @@ def main(argv=None):
                         (args.dump_shared,
                          render_shared_rows(buckets["shared_paths"])),
                         (args.dump_longest,
-                         render_longest_rows(buckets["longest_urls"]))):
+                         render_longest_rows(buckets["longest_urls"])),
+                        (args.dump_canonical,
+                         render_canonical_rows(
+                             buckets["canonical_paths"]))):
         if path is None:
             continue
         try:

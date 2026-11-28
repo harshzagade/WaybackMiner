@@ -1813,6 +1813,98 @@ class TestBucketDumps(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("could not write", err.getvalue())
 
+    def test_render_canonical_rows_formats_base_count_and_urls(self):
+        records = [
+            {"base": "http://example.com/search", "variants": 2,
+             "urls": ["http://example.com/search?q=a",
+                      "http://example.com/search?q=b"]},
+            {"base": "http://example.com/item", "variants": 3,
+             "urls": ["http://example.com/item?id=1",
+                      "http://example.com/item?id=2",
+                      "http://example.com/item?id=3"]},
+        ]
+        self.assertEqual(wm.render_canonical_rows(records),
+                         ["http://example.com/search 2 "
+                          "http://example.com/search?q=a,"
+                          "http://example.com/search?q=b",
+                          "http://example.com/item 3 "
+                          "http://example.com/item?id=1,"
+                          "http://example.com/item?id=2,"
+                          "http://example.com/item?id=3"])
+
+    def test_dump_canonical_writes_base_count_and_variant_rows(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/search?q=a",
+             "statuscode": "200"},
+            {"original": "http://example.com/search?q=b",
+             "statuscode": "200"},
+            {"original": "http://example.com/solo", "statuscode": "200"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "canonical.txt")
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--dump-canonical", path],
+                                           tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                # only /search clusters (2 variants); /solo has one URL
+                self.assertEqual(
+                    fh.read(),
+                    "http://example.com/search 2 "
+                    "http://example.com/search?q=a,"
+                    "http://example.com/search?q=b\n")
+
+    def test_dump_canonical_empty_bucket_writes_empty_file(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200"},
+            {"original": "http://example.com/b", "statuscode": "200"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "canonical.txt")
+            # distinct bases, no query variants — no canonical cluster,
+            # an empty file, not an error, like the other dumps
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--dump-canonical", path],
+                                           tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "")
+
+    def test_dump_canonical_works_alongside_json_mode(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/search?q=a",
+             "statuscode": "200"},
+            {"original": "http://example.com/search?q=b",
+             "statuscode": "200"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "canonical.txt")
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--json", "--dump-canonical",
+                                            path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                first = fh.readline()
+            self.assertEqual(
+                first,
+                "http://example.com/search 2 "
+                "http://example.com/search?q=a,"
+                "http://example.com/search?q=b\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_canonical_unwritable_path_returns_2(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "missing-dir", "canonical.txt")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                rc = self._run(["--dump-canonical", bad], tmp)
+            self.assertEqual(rc, 2)
+            self.assertIn("could not write", err.getvalue())
+
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_dump_unwritable_path_returns_2(self, _):
         import os, tempfile

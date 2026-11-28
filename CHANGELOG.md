@@ -4,6 +4,15 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--dump-canonical FILE` per-bucket dump flag: writes the canonical-paths
+  bucket to FILE, one `base variants url1,url2` row per line (the base
+  path, how many query-string variants it has, and the variant URLs),
+  mirroring `--dump-stale` / `--dump-newest` / `--dump-drift` /
+  `--dump-shared` / `--dump-longest` — independent of the printed
+  output mode (so it works alongside `--json`), and an unwritable dump
+  path fails fast with exit 2 like the other dump flags. The bucket is
+  empty when no base has two or more variants, so such a run writes an
+  empty file. Rows come from the new `render_canonical_rows()` helper.
 - `--dump-longest FILE` per-bucket dump flag: writes the longest-URLs
   bucket to FILE, one `url length` row per line (the URL and its
   character length, longest first), mirroring `--dump-stale` /

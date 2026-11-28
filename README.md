@@ -19,7 +19,7 @@ touches the target itself.
 - **URLs with query parameters** — injection surface
 - **Interesting files** — `.php`, `.bak`, `.sql`, `.env`, `.json`, `.git`, …
 - **Duplicate content clusters** — URLs that served the identical response body (same CDX digest), i.e. the same page at many paths
-- **Canonical-path clusters** — archived URLs that differ only by query string, grouped under one base path + variant count, so a parameterized endpoint archived under many query strings surfaces as one row
+- **Canonical-path clusters** — archived URLs that differ only by query string, grouped under one base path + variant count, so a parameterized endpoint archived under many query strings surfaces as one row; the `--dump-canonical FILE` flag writes the same records as `base variants url1,url2` rows, one per line, for parameterized-URL cluster triage
 - **Extension rollup** — archived-URL counts per file extension, so the makeup of the archived surface is visible at a glance
 - **Response-size rollup** — archived-URL counts per CDX length band (<10KB, 10-100KB, 100KB-1MB, >1MB), so the payload-size makeup of the archived surface is visible at a glance
 - **First-path-segment rollup** — archived-URL counts per top-level path segment, so the biggest site sections stand out at a glance
@@ -58,6 +58,7 @@ python3 waybackminer.py example.com --dump-newest newest.txt  # newest captures:
 python3 waybackminer.py example.com --robots-drift --dump-drift drift.txt  # robots drift: 'url pattern' rows
 python3 waybackminer.py example.com --dump-shared shared.txt  # shared paths: 'path host_count host1,host2' rows
 python3 waybackminer.py example.com --dump-longest longest.txt  # longest URLs: 'url length' rows, longest first
+python3 waybackminer.py example.com --dump-canonical canonical.txt  # canonical paths: 'base variants url1,url2' rows
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
 python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only depth 2-3 URLs
