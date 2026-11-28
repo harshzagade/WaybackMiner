@@ -13,7 +13,7 @@ touches the target itself.
 - **All archived URLs** for a domain (deduped, sorted)
 - **Per-subdomain URL counts** — see where the archived surface actually lives
 - **First-seen / last-seen timestamps** per URL, from the CDX capture history
-- **Capture gaps** — URLs with the longest span between first and last capture (dormant pages re-captured years later)
+- **Capture gaps** — URLs with the longest span between first and last capture (dormant pages re-captured years later); the `--dump-gaps FILE` flag writes the same records as `url first_seen last_seen gap_days` rows, one per line, longest gap first, for dormant-page triage
 - **Status changes** — URLs whose captures span two or more HTTP status codes (pages that were removed, moved, or came back)
 - **JavaScript files** — prime recon targets
 - **URLs with query parameters** — injection surface
@@ -59,6 +59,7 @@ python3 waybackminer.py example.com --robots-drift --dump-drift drift.txt  # rob
 python3 waybackminer.py example.com --dump-shared shared.txt  # shared paths: 'path host_count host1,host2' rows
 python3 waybackminer.py example.com --dump-longest longest.txt  # longest URLs: 'url length' rows, longest first
 python3 waybackminer.py example.com --dump-canonical canonical.txt  # canonical paths: 'base variants url1,url2' rows
+python3 waybackminer.py example.com --dump-gaps gaps.txt  # capture gaps: 'url first_seen last_seen gap_days' rows, longest first
 python3 waybackminer.py example.com --exclude-host blog.example.com  # drop one subdomain's captures
 python3 waybackminer.py example.com --exclude-path /admin/  # drop captures under a path prefix
 python3 waybackminer.py example.com --min-depth 2 --max-depth 3  # keep only depth 2-3 URLs

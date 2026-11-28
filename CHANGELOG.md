@@ -4,6 +4,16 @@ All notable changes to WaybackMiner are documented here.
 
 ## [Unreleased]
 ### Added
+- `--dump-gaps FILE` per-bucket dump flag: writes the capture-gaps
+  bucket to FILE, one `url first_seen last_seen gap_days` row per line
+  (the URL and the capture span in whole days, longest gap first),
+  mirroring `--dump-stale` / `--dump-newest` / `--dump-drift` /
+  `--dump-shared` / `--dump-longest` / `--dump-canonical` — independent
+  of the printed output mode (so it works alongside `--json`), and an
+  unwritable dump path fails fast with exit 2 like the other dump flags.
+  The bucket holds at most 10 rows and is empty when no URL spans more
+  than a day between captures, so such a run writes an empty file. Rows
+  come from the new `render_gap_rows()` helper.
 - `--dump-canonical FILE` per-bucket dump flag: writes the canonical-paths
   bucket to FILE, one `base variants url1,url2` row per line (the base
   path, how many query-string variants it has, and the variant URLs),

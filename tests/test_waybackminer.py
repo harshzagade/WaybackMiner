@@ -1905,6 +1905,100 @@ class TestBucketDumps(unittest.TestCase):
             self.assertEqual(rc, 2)
             self.assertIn("could not write", err.getvalue())
 
+    def test_render_gap_rows_formats_url_span_and_days(self):
+        records = [
+            {"url": "http://example.com/old",
+             "first_seen": "20190601000000",
+             "last_seen": "20240101000000", "gap_days": 1675},
+            {"url": "http://example.com/new",
+             "first_seen": "20240105000000",
+             "last_seen": "20240106000000", "gap_days": 1},
+        ]
+        self.assertEqual(wm.render_gap_rows(records),
+                         ["http://example.com/old 20190601000000 "
+                          "20240101000000 1675",
+                          "http://example.com/new 20240105000000 "
+                          "20240106000000 1"])
+
+    def test_dump_gaps_writes_url_span_and_days_rows_longest_first(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/old", "statuscode": "200",
+             "timestamp": "20190601000000"},
+            {"original": "http://example.com/old", "statuscode": "200",
+             "timestamp": "20240101000000"},  # dup: widens the gap
+            {"original": "http://example.com/mid", "statuscode": "200",
+             "timestamp": "20230101000000"},  # single capture: no gap
+            {"original": "http://example.com/new", "statuscode": "200",
+             "timestamp": "20240105000000"},
+            {"original": "http://example.com/new", "statuscode": "200",
+             "timestamp": "20240106000000"},  # dup: 1-day gap
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "gaps.txt")
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--dump-gaps", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                # longest gap first; /mid has a 0-day gap and stays out
+                self.assertEqual(
+                    fh.read(),
+                    "http://example.com/old 20190601000000 "
+                    "20240101000000 1675\n"
+                    "http://example.com/new 20240105000000 "
+                    "20240106000000 1\n")
+
+    def test_dump_gaps_empty_bucket_writes_empty_file(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/a", "statuscode": "200",
+             "timestamp": "20240101000000"},
+            {"original": "http://example.com/b", "statuscode": "200",
+             "timestamp": "20240102000000"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "gaps.txt")
+            # single captures only — no URL spans more than a day, so
+            # the bucket is empty; an empty file, not an error, like
+            # the other dumps
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--dump-gaps", path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(fh.read(), "")
+
+    def test_dump_gaps_works_alongside_json_mode(self):
+        import os, tempfile
+        entries = [
+            {"original": "http://example.com/old", "statuscode": "200",
+             "timestamp": "20190601000000"},
+            {"original": "http://example.com/old", "statuscode": "200",
+             "timestamp": "20240101000000"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "gaps.txt")
+            with mock.patch("waybackminer.fetch_cdx",
+                            return_value=entries):
+                self.assertEqual(self._run(["--json", "--dump-gaps",
+                                            path], tmp), 0)
+            with open(path, encoding="utf-8") as fh:
+                first = fh.readline()
+            self.assertEqual(
+                first,
+                "http://example.com/old 20190601000000 "
+                "20240101000000 1675\n")
+
+    @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
+    def test_dump_gaps_unwritable_path_returns_2(self, _):
+        import os, tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = os.path.join(tmp, "missing-dir", "gaps.txt")
+            err = io.StringIO()
+            with mock.patch("sys.stderr", err):
+                rc = self._run(["--dump-gaps", bad], tmp)
+            self.assertEqual(rc, 2)
+            self.assertIn("could not write", err.getvalue())
+
     @mock.patch("urllib.request.urlopen", side_effect=_fake_urlopen)
     def test_dump_unwritable_path_returns_2(self, _):
         import os, tempfile

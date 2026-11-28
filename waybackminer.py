@@ -1140,6 +1140,17 @@ def render_canonical_rows(records):
             for r in records]
 
 
+def render_gap_rows(records):
+    """Format capture-gap records as 'url first_seen last_seen gap_days'
+    rows, in the given order — the row shape the --dump-gaps file writes,
+    so a pipeline gets the dormant URL plus the capture span that makes
+    the gap meaningful (a bare URL list would lose how long the page sat
+    untouched between captures).
+    """
+    return [f"{r['url']} {r['first_seen']} {r['last_seen']} "
+            f"{r['gap_days']}" for r in records]
+
+
 def print_report(buckets, js_only=False, params_only=False, interesting_only=False,
                json_only=False, subdomains_only=False, csv_only=False,
                snapshot_links=False, timeline_only=False):
@@ -1440,6 +1451,16 @@ def main(argv=None):
                          "parameterized-URL cluster triage; the bucket is "
                          "empty when no base has two or more variants, in "
                          "which case an empty file is written")
+    ap.add_argument("--dump-gaps", dest="dump_gaps", metavar="FILE",
+                    help="write the capture-gaps bucket to FILE, one "
+                         "'url first_seen last_seen gap_days' row per line "
+                         "(the URL and the capture span in whole days, "
+                         "longest gap first), mirroring --dump-stale / "
+                         "--dump-newest / --dump-drift / --dump-shared / "
+                         "--dump-longest / --dump-canonical, for dormant-page "
+                         "triage; the bucket holds at most 10 rows and is "
+                         "empty when no URL spans more than a day between "
+                         "captures, in which case an empty file is written")
     ap.add_argument("--ext", type=parse_extensions, default=None,
                     metavar="EXTS",
                     help="comma-separated file extensions to keep, e.g. "
@@ -1570,7 +1591,9 @@ def main(argv=None):
                          render_longest_rows(buckets["longest_urls"])),
                         (args.dump_canonical,
                          render_canonical_rows(
-                             buckets["canonical_paths"]))):
+                             buckets["canonical_paths"])),
+                        (args.dump_gaps,
+                         render_gap_rows(buckets["capture_gaps"]))):
         if path is None:
             continue
         try:
